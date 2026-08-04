@@ -18,7 +18,7 @@ import numpy as np
 
 from config import Config
 from infra.flightlog import FlightLog
-from sources.types import FcState, FrameBundle, PlannerCommand
+from sources.types import DepthResult, FcState, FrameBundle, PlannerCommand
 
 FRAME_WIDTH = 64  # side-by-side, so 32 px per eye
 FRAME_HEIGHT = 24
@@ -133,3 +133,69 @@ class FakePipeline:
 
 def fake_pipeline_factory(cfg: Config) -> FakePipeline:
     return FakePipeline(cfg=cfg)
+
+
+# --------------------------------------------------------------------------
+# Red-box renders
+# --------------------------------------------------------------------------
+
+# BGR, so red is the last channel.
+RED_BGR = (30, 30, 220)
+DISTRACTOR_COLOURS = {
+    "orange": (30, 140, 240),  # the nearest neighbour in hue -- the real risk
+    "magenta": (200, 40, 220),
+    "blue": (220, 60, 30),
+    "green": (40, 190, 60),
+}
+
+
+def render_scene(
+    width: int = 320,
+    height: int = 240,
+    box: tuple[int, int, int, int] | None = (120, 90, 60, 60),
+    background: str = "grey",
+    distractors: list[tuple[str, tuple[int, int, int, int]]] | None = None,
+    occluder: tuple[int, int, int, int] | None = None,
+    box_colour: tuple[int, int, int] = RED_BGR,
+    seed: int = 7,
+) -> np.ndarray:
+    """Render a red box over a background, with optional distractors.
+
+    ``background`` is "grey", "noise", "gradient", or "red_ish" -- the last
+    being a desaturated reddish wash that a hue-only threshold would fall for
+    but a saturation floor should reject.
+    """
+    rng = np.random.default_rng(seed)
+    if background == "noise":
+        image = rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
+    elif background == "gradient":
+        ramp = np.linspace(0, 255, width, dtype=np.uint8)
+        image = np.repeat(np.repeat(ramp[None, :, None], height, axis=0), 3, axis=2)
+        image = np.ascontiguousarray(image)
+    elif background == "red_ish":
+        image = np.full((height, width, 3), (170, 170, 200), dtype=np.uint8)
+    else:
+        image = np.full((height, width, 3), 128, dtype=np.uint8)
+
+    for name, rect in distractors or []:
+        x, y, w, h = rect
+        cv2.rectangle(image, (x, y), (x + w - 1, y + h - 1), DISTRACTOR_COLOURS[name], -1)
+
+    if box is not None:
+        x, y, w, h = box
+        cv2.rectangle(image, (x, y), (x + w - 1, y + h - 1), box_colour, -1)
+
+    if occluder is not None:
+        x, y, w, h = occluder
+        cv2.rectangle(image, (x, y), (x + w - 1, y + h - 1), (60, 60, 60), -1)
+
+    return np.ascontiguousarray(image)
+
+
+def flat_depth(
+    width: int = 320, height: int = 240, depth_m: float = 4.0, valid: bool = True
+) -> DepthResult:
+    """A DepthResult with one constant depth everywhere (or nothing valid)."""
+    mask = np.full((height, width), valid, dtype=bool)
+    depth = np.full((height, width), depth_m if valid else np.nan, dtype=np.float32)
+    return DepthResult(depth_m=depth, valid=mask, conf=None, t_ns=0)

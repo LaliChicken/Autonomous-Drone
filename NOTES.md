@@ -215,3 +215,88 @@ an empty stub and was not in packages A–D. Flagged rather than acted on.
 
 **`depth/backends.py` and `depth/holepunch.py` untouched** — owned stubs.
 `SgbmCpuBackend` satisfies the `DepthBackend` protocol structurally.
+
+## Package C decisions — perception + world
+
+**`ObstacleScan` is not an `OccupancySnapshot`.** The scan deliberately has no
+`danger` field, because danger depends on airspeed and perception has no business
+knowing how fast the aircraft is going. `world.occupancy` adds it at snapshot time,
+where the speed actually is.
+
+**An unknown bin carries NaN range, not zero and not infinity.** Zero reads as an
+obstacle at the lens; infinity reads as clear. NaN is the only value that fails
+*both* "is this closer than X" and "is this further than X", so a bin whose
+`unknown` flag someone forgot to check still cannot be mistaken for either. The
+same reasoning as the depth NaN rule, one level up.
+
+**5th percentile, not minimum.** The minimum of half a million noisy points is
+whatever the single worst outlier happened to be — one surviving speckle would park
+a phantom obstacle in the bin. The 5th percentile still answers "how close is the
+near surface" but needs a few hundred pixels to agree before it moves. There is a
+test that drops one rogue pixel at 0.5 m into an 8 m wall and asserts the bin does
+not move.
+
+**Per-bin percentile via one argsort, not N masks.** Masking per bin costs N passes
+over the full point cloud; at 1280×720 with 32 bins that is tens of millions of
+comparisons per frame. One `argsort` plus `searchsorted` gets the same answer in a
+single pass.
+
+**Merging keeps the nearer of new and remembered.** If two recent observations
+disagree about how close something is, the closer one is the one worth flying by.
+The cost — a transient false positive holds the bin pessimistic — is bounded by
+`max_age_s` rather than permanent, and there is a test for exactly that expiry.
+Pessimistic is the survivable direction.
+
+**A scan that reports `unknown` does not erase memory.** A frame where the matcher
+found nothing is not evidence of empty space, so an unknown scan bin leaves the
+remembered range alone and lets normal decay handle it.
+
+**`danger` and `unknown` are separate and neither implies the other.** `danger`
+means "something measured is too close for the current speed"; `unknown` means
+"nothing was measured". `NaN < threshold` is False, so unknown bins are never
+flagged dangerous — that is deliberate, not an accident of NaN. A planner must
+refuse both, but for different reasons, and collapsing them would hide which one is
+happening. `passable()` is the single place the "unknown is impassable" rule is
+written down, so the planner cannot accidentally reimplement it as "unknown is
+fine".
+
+**The occupancy map never reads a clock.** Every timestamp is passed in, so
+replaying a log reproduces the same state exactly. Tested by running the same
+sequence twice and comparing.
+
+**Snapshot ages as well as update.** A planner ticking faster than the camera has
+to see stale bins expire on time, not at the next frame.
+
+**Red uses two hue bands because it wraps 0/179.** A single `inRange` cannot express
+it, and the half a one-band detector loses is typically the saturated half — i.e.
+the target. There is a test that takes a red which lands in the high band, asserts
+the low band alone misses it, and asserts the two-band mask catches it, so the
+reason for the complexity is pinned down.
+
+**Two range estimates are reported, never blended.** `range_stereo` (median valid
+depth in the box) needs texture and stereo overlap but does not care about the
+box's true size; `range_size` (`f·w_m/w_px`) is always available but wrong if the
+box is not the configured width or is clipped by the frame edge. They fail in
+unrelated ways, so their *disagreement* is diagnostic — `range_agreement` exposes
+it, and `touches_border` flags the case that breaks `range_size`. Averaging them
+would destroy exactly the signal worth having.
+
+**Box confidence is `solidity × fill_ratio`, with no weights.** Both cues are
+already 0..1 and a genuine square scores high on each, so the product needs no
+tuning constants — and weights would be two more tunables with no principled value.
+Range agreement is deliberately *not* folded in, since it is unavailable without
+depth and would make confidence mean different things frame to frame.
+
+**Left QUESTION(rahul) in `perception/obstacles.py`: the FOV is not symmetric and
+the config does not admit it.** StereoSGBM cannot match the leftmost
+`numDisparities` columns, so with 128 disparities on a 1280 px eye about 6.5° of
+the 65° FOV — roughly the leftmost 3 of 32 bins — is unknown on every frame,
+permanently. Since unknown is impassable, the planner sees a standing wall in its
+left periphery and will be biased against left turns. This is the mirror image of
+the right-edge problem fixed in Package B, except that one was mine to fix and this
+one is inherent to the geometry. Three options offered (narrow `fov_deg` to the
+observable wedge, accept the bias, or run a right-referenced matcher); it needs a
+flight-behaviour call, so I did not pick.
+
+**`perception/ground_mask.py` untouched** — owned. `scan_from_depth` takes an
+optional `exclude_mask` and applies it, and never tries to infer the ground itself.
