@@ -62,3 +62,70 @@ makes imports work.
 opencv-python 5.0.0.93, pymavlink 2.4.49, pyyaml 6.0.3, pytest 9.1.1, ruff 0.16.1.
 Note OpenCV is v5 — `StereoSGBM_create`, `reprojectImageTo3D`, and `filterSpeckles`
 were all verified present before Package B was designed around them.
+
+## Package A decisions — infra
+
+**Nearest-rank percentiles, not interpolated ones.** An interpolated p99 reports
+a latency that no tick ever took. For a budget the useful claim is "the
+99th-slowest tick actually took this long", so `nearest_rank` always returns a
+value from the sample set. It is also exactly reproducible, which the replay
+determinism test depends on.
+
+**Stage samples live in a bounded ring** (`metrics.window`, default 2048) so a long
+flight cannot grow the process. `Metrics.stage()` records in a `finally`, so a
+stage that fails slowly still appears in the rollup instead of disappearing along
+with the exception. Stages never recorded are *absent* from the rollup rather than
+zeroed — a 0 ms row reads as "instant", which is the opposite of the truth.
+
+**Frames are logged as the received MJPG bitstream, never re-encoded.** A re-encode
+would change the pixels every downstream result was computed from, so a "replay"
+would silently be a different run. Storage is one concatenated blob plus a JSONL
+index of `(seq, t_ns, offset, length)`; the reader seeks by offset rather than
+assuming contiguity, so a truncated log still yields the frames it can address and
+raises on the one it cannot.
+
+**The run directory stores the config twice, on purpose.** `config.yaml` is the
+verbatim YAML mapping (degrees) and loads straight back through
+`load_config_from_dict`; `config.json` is the resolved view (radians, derived) for
+reading. `Config.to_dict()` deliberately is *not* re-loadable, so `Config.raw` was
+added to carry the original mapping — without it replay cannot reconstruct the
+config a run was flown with, which makes A/B meaningless.
+
+**Wall clock appears exactly twice** — the run directory name and `created_utc` —
+and never in a record the pipeline consumes. CLOCK_MONOTONIC cannot name a
+directory a human will look for tomorrow, but everything read back into the
+pipeline is monotonic ns.
+
+**`git_revision()` never raises.** A run must stay loggable outside a checkout or
+with git absent; the failure reason is recorded in the meta so the log explains
+why it has no revision rather than silently claiming none.
+
+**Replay takes the pipeline as an injected factory, not an import.** Partly because
+perception and planning do not exist yet, but mainly because replay must drive the
+same object the live stack builds — a replay that constructs its own pipeline is
+testing a lookalike. `ReplayPipeline` (`reset()` + `tick()`) is the whole contract.
+
+**Determinism is tested with a guard on the guard.** `FakePipeline` is deliberately
+stateful and config-sensitive, and there is a second test using a subclass whose
+`reset()` does nothing, asserting that the streams *do* diverge. Without it, the
+determinism test could pass because the fake was too simple to fail.
+
+**Telemetry pairing is a zero-order hold, not interpolation.** `FcState` carries
+`mode`, `armed`, and `rc`, none of which can be averaged, so the honest answer for
+a frame is the last state actually received at or before it.
+
+**Non-finite distances round-trip through the log.** Python's JSON extension
+encodes `NaN`/`Infinity` and reads them back, and Package C needs that: a bin with
+no measurement must not serialise to a number that reads as a range. Cost is that
+`planner.jsonl` is Python-JSON, not strict RFC 8259 — `jq` will reject those lines.
+Acceptable while the only consumer is this stack's replay.
+
+**`decode_frame` currently owns the split rule.** `sources/stereo_uvc.py` is empty
+and was not part of packages A–D, so replay decodes MJPG and splits at the midline
+itself. It splits at the midline of the *decoded* frame rather than at
+`config.camera.frame_width / 2`, so an older log at a different resolution fails
+loudly instead of handing over two misaligned halves. Left a `# QUESTION(rahul):`
+that this should call into `stereo_uvc` once it exists — two places deciding where
+the midline is, is one too many.
+
+**`infra/netview.py` was left empty**: not part of the Package A brief.

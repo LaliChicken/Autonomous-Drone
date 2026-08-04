@@ -12,6 +12,7 @@ the dataclasses free of numpy arrays.
 
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
@@ -467,6 +468,14 @@ class MavlinkConfig:
 
 
 @dataclass(frozen=True)
+class MetricsConfig:
+    window: int
+
+    def validate(self) -> None:
+        _require(self.window >= 1, "metrics.window must be >= 1")
+
+
+@dataclass(frozen=True)
 class FlightlogConfig:
     root: str
     write_frames: bool
@@ -490,8 +499,14 @@ class Config:
     behaviours: BehavioursConfig
     offboard: OffboardConfig
     mavlink: MavlinkConfig
+    metrics: MetricsConfig
     flightlog: FlightlogConfig
     source_path: str = field(default="", compare=False)
+    # The YAML-shaped mapping this Config was built from, kept verbatim so a
+    # flight log can snapshot something that loads straight back through
+    # load_config_from_dict. to_dict() is the *resolved* view (radians,
+    # derived values) and is not re-loadable, which is why both are stored.
+    raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     def validate(self) -> None:
         for f in fields(self):
@@ -538,8 +553,13 @@ class Config:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Plain-dict form, for the flight-log config snapshot."""
+        """Resolved plain-dict form (radians, derived values), for inspection.
+
+        Not re-loadable — use ``raw`` for a snapshot you intend to load back.
+        """
         out = asdict(self)
+        out.pop("raw", None)
+        out.pop("source_path", None)
         out["mavlink"]["stream_rates_hz"] = dict(self.mavlink.stream_rates_hz)
         return out
 
@@ -577,6 +597,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     beh = _section(raw, "behaviours")
     off = _section(raw, "offboard")
     mav = _section(raw, "mavlink")
+    met = _section(raw, "metrics")
     log = _section(raw, "flightlog")
 
     rates = _get(mav, "stream_rates_hz", "mavlink")
@@ -711,12 +732,16 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
                 _get(mav, "attitude_max_extrapolation_s", "mavlink")
             ),
         ),
+        metrics=MetricsConfig(
+            window=int(_get(met, "window", "metrics")),
+        ),
         flightlog=FlightlogConfig(
             root=str(_get(log, "root", "flightlog")),
             write_frames=bool(_get(log, "write_frames", "flightlog")),
             fsync_every=int(_get(log, "fsync_every", "flightlog")),
         ),
         source_path=source_path,
+        raw=copy.deepcopy(raw),
     )
 
 

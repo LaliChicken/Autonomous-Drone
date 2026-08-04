@@ -161,6 +161,11 @@ mavlink:
   # attitude_at() refuses to extrapolate further than this beyond the buffer.
   attitude_max_extrapolation_s: 0.05
 
+metrics:
+  # Per-stage ring-buffer length used for the p50/p99 rollups. Bounded so a
+  # long flight cannot grow the process without limit.
+  window: 2048
+
 flightlog:
   root: runs
   # Frames are written as the received MJPG bitstream; no re-encode.
