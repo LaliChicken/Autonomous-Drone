@@ -300,3 +300,102 @@ flight-behaviour call, so I did not pick.
 
 **`perception/ground_mask.py` untouched** — owned. `scan_from_depth` takes an
 optional `exclude_mask` and applies it, and never tries to infer the ground itself.
+
+## Package D decisions — SITL control chain
+
+**`behaviours.py`, not `behaviors.py`.** The brief used the American spelling; the
+repo already had the British one and the instruction was to fill existing files
+rather than restructure. Flagging it because a future `from planner.behaviors
+import ...` will fail.
+
+**Two additions to the VFH-lite spec, both deliberate.**
+
+*Candidates also exclude `danger`.* The brief says "clearance > threshold AND not
+unknown". Danger is a third condition and is *not* implied by the other two: at
+2.5 m/s the danger distance is ~3.25 m while `clearance_threshold_m` is 2.5 m, so a
+bin at 3.0 m passes the clearance test while being flagged too close to stop in.
+Excluded via `world.occupancy.passable` so the rule stays in one place. There is a
+test that constructs exactly that band and asserts zero candidates.
+
+*The aircraft yaws toward its heading instead of translating along it.* A quad can
+fly sideways and it would be faster, but sideways is where the only forward-facing
+camera is not looking, so the occupancy map there is unknown — and unknown is
+impassable. Forward speed is scaled by `cos(theta)` and the aircraft turns to face
+where it is going. Never translate where you cannot see.
+
+**The turn term as literally specified was unusable, and this was the real bug of
+the package.** `w_turn * |turn_rate|` with `turn_rate = Δbearing/dt` scales as
+`1/dt`, so the weight means something different at every loop rate. At the actual
+20 Hz it outweighed the goal term roughly tenfold and the planner simply refused to
+turn — with the goal at +30° it picked +2°. Two fixes: the rate is normalised by
+`max_yaw_rate` into a dimensionless 0..1 penalty, and there is no penalty at all on
+the first plan after a reset or STOP, since hysteresis needs something to be
+hysteretic about.
+
+**Yaw rate needed a real gain, so `local_planner.yaw_align_time_s` was added.**
+Using `dt` as the gain made a 2° heading error — less than one bin width — command
+full yaw rate, and silently changed the gain with the loop rate. Now
+`yaw_rate = bearing / yaw_align_time_s`, capped by `max_yaw_rate`. There is a
+regression test asserting a small error does not command full yaw.
+
+**Guards are pure functions of a frozen `GuardContext`, in one marked block.** The
+context is frozen and self-contained so a guard cannot reach into the machine and
+depend on history the tests do not control. Each is tested individually; the
+machine is tested separately for the sequencing it puts around them.
+
+**The speed clamp is applied to every emitted command, not on state entry.** A clamp
+that only fires at the entry tick does nothing about the tick after it. Tested by
+asking for 99 m/s on every tick for 60 ticks.
+
+**Losing flight authority outranks every other transition, from every state.** Not
+GUIDED, disarmed, EKF unhappy, or no FC state at all → IDLE immediately.
+
+**Offboard staleness brakes smoothly rather than cutting.** Three mechanisms cover
+three failures: this layer ramps to zero over `command_timeout_s` so a few dropped
+frames do not jolt the aircraft, the owned watchdog does the emergency cut, and
+GUIDED brakes by itself after ~3 s of silence. Freshness is measured from
+*submission*, not `command.t_ns` — the command's own timestamp is when the frame was
+captured, so using it would count perception latency as staleness and brake for no
+reason. A long tick gap is clamped to 4 periods, or a stalled loop could slew by
+`accel × gap` and the acceleration limit would stop meaning anything on exactly the
+tick that matters.
+
+**Attitude interpolation goes the short way round.** Yaw crosses ±π routinely and a
+naive lerp between 179° and −179° gives 0° — pointing exactly backwards while the
+aircraft is doing nothing unusual. `attitude_at` also refuses to extrapolate beyond
+`attitude_max_extrapolation_s`: a frame timestamped before the link came up has no
+attitude, and inventing one silently mis-projects every obstacle in it.
+
+**Out-of-range rangefinder readings are dropped, not stored.** A TFmini reporting
+its maximum means "nothing seen", not "the ground is 12 m away"; storing it would
+put a phantom floor under the aircraft.
+
+**SYS_STATUS: absent-and-disabled is not a failure.** Only present-and-enabled-but-
+unhealthy means the EKF is broken, or every FC without the sensor would read as
+faulty.
+
+**The MAVLink tests use real pymavlink messages over a fake transport.** Only the
+socket is faked — the hardware boundary. Every field mapping, the type mask (1479),
+and `MAV_FRAME_BODY_OFFSET_NED` are checked against genuine message objects rather
+than a test's idea of them.
+
+**The red-box scenario puts the target at 40°, outside the ±32.5° FOV, on purpose.**
+The box is invisible until SEARCH has yawed far enough to bring it into view. A
+scenario with the target already in frame would never exercise the search behaviour
+at all, which is the interesting part.
+
+**The wall scenario is a plane, not a cylinder.** Range grows as `d/cos(bearing)`
+across the bins because that is what a flat wall looks like in polar coordinates. A
+constant-range "wall" is a cylinder centred on the aircraft and would let a planner
+that only reads the centre bin pass a test it should fail.
+
+**Non-SITL tests are the real coverage.** They drive occupancy → planner → behaviour
+machine through a stated geometry and assert on the decision. The SITL tests fly the
+same scenarios against real ArduPilot and assert on what the aircraft did; they are
+skipped unless `DRONE_SITL=1`. **The SITL tests have never been executed** — there is
+no ArduPilot checkout in this environment. They are written against the documented
+MAVLink behaviour and are unverified end to end.
+
+**`control/gate.py`, `control/watchdog.py`, `planner/governor.py`,
+`planner/supervisor.py` untouched** — owned. `OffboardLoop` takes `emit` as an
+injected callable; in tests that is a list, in flight it is the gate.

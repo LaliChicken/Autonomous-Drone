@@ -131,6 +131,11 @@ local_planner:
   max_yaw_rate_dps: 60.0
   # Clearance is floored at this before dividing, so the term stays finite.
   min_clearance_for_cost_m: 0.25
+  # Time constant for nulling a heading error: yaw_rate = bearing / this,
+  # capped at max_yaw_rate_dps. This is a control gain and needs to be one --
+  # using the loop period instead would make a 2 deg error command full yaw
+  # rate, and would silently change the gain whenever the loop rate changed.
+  yaw_align_time_s: 0.5
 
 behaviours:
   # Speed clamp applied on entry to ANY autonomous state.

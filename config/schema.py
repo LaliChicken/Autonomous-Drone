@@ -389,11 +389,13 @@ class LocalPlannerConfig:
     w_turn: float
     max_yaw_rate_rad_s: float
     min_clearance_for_cost_m: float
+    yaw_align_time_s: float
 
     def validate(self) -> None:
         _require(
             self.clearance_threshold_m > 0.0, "local_planner.clearance_threshold_m must be > 0"
         )
+        _require(self.yaw_align_time_s > 0.0, "local_planner.yaw_align_time_s must be > 0")
         for name in ("w_goal", "w_clearance", "w_turn"):
             _require(getattr(self, name) >= 0.0, f"local_planner.{name} must be >= 0")
         _require(self.max_yaw_rate_rad_s > 0.0, "local_planner.max_yaw_rate_dps must be > 0")
@@ -735,6 +737,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
             min_clearance_for_cost_m=float(
                 _get(plan, "min_clearance_for_cost_m", "local_planner")
             ),
+            yaw_align_time_s=float(_get(plan, "yaw_align_time_s", "local_planner")),
         ),
         behaviours=BehavioursConfig(
             autonomy_speed_max_mps=float(_get(beh, "autonomy_speed_max_mps", "behaviours")),
