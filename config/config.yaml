@@ -1,0 +1,169 @@
+# Single source of truth for every tunable in the stack.
+#
+# Angles are DEGREES in this file (human-editable) and are converted to radians
+# by the loader. Everything downstream of config/ is radians, metres, seconds,
+# and integer nanoseconds.
+
+envelope:
+  # Hard flight envelope. Nothing in the stack may command outside this.
+  max_speed_mps: 5.0
+  max_agl_m: 10.0
+  max_yaw_rate_dps: 90.0
+
+camera:
+  # Waveshare AR0144 stereo: ONE UVC device delivering a side-by-side frame
+  # that is split at the vertical midline.
+  device_index: 0
+  frame_width: 2560          # full side-by-side frame
+  frame_height: 720
+  fps: 30
+  fourcc: MJPG
+  baseline_m: 0.052
+  hfov_deg: 65.0             # per eye
+  # Rectification/Q comes from calibration when it exists. Until then the
+  # loader synthesises a nominal Q from baseline + hfov + resolution.
+  # See QUESTION(rahul) in config/schema.py.
+  calibration_npz: null
+
+mount:
+  # Camera pose in the body frame (FRD). Translation is the camera optical
+  # centre relative to the body origin, metres. Rotation is applied on top of
+  # the fixed camera(RDF) -> body(FRD) axis swap.
+  x_m: 0.08
+  y_m: 0.0
+  z_m: 0.02
+  # Signs match the FC attitude convention (ArduPilot): positive pitch is
+  # nose-UP, positive yaw is to the right. Tilt the camera down with a
+  # NEGATIVE pitch_deg.
+  roll_deg: 0.0
+  pitch_deg: 0.0
+  yaw_deg: 0.0
+
+depth:
+  sgbm:
+    min_disparity: 0
+    num_disparities: 128     # must be divisible by 16
+    block_size: 5            # odd
+    uniqueness_ratio: 10
+    speckle_window_size: 100
+    speckle_range: 2
+    disp12_max_diff: 1
+    pre_filter_cap: 63
+    # P1/P2 follow the OpenCV guidance P1=8*ch*bs^2, P2=32*ch*bs^2 when null.
+    p1: null
+    p2: null
+    mode_sgbm_3way: true
+  postprocess:
+    min_depth_m: 0.4
+    max_depth_m: 12.0
+    speckle_max_area_px: 200
+    speckle_max_diff_m: 0.25
+    lr_consistency: true
+    lr_max_disp_diff_px: 1.5
+    # Confidence below this is treated as invalid.
+    min_confidence: 0.0
+
+obstacles:
+  n_bins: 32
+  fov_deg: 65.0              # bin span, centred on straight ahead
+  distance_percentile: 5.0
+  # A bin with fewer than this many valid points carries no information.
+  min_points_per_bin: 25
+  # Point count at which bin confidence saturates at 1.0.
+  points_for_full_confidence: 400
+  # Height gate, metres relative to the vehicle, positive UP.
+  # Points outside this slab are ignored (ground, canopy).
+  height_floor_m: -1.5
+  height_ceiling_m: 2.0
+
+red_box:
+  # Red wraps the hue circle, so two ranges. OpenCV hue is 0..179.
+  hue_lo_1: 0
+  hue_hi_1: 10
+  hue_lo_2: 170
+  hue_hi_2: 179
+  sat_min: 120
+  sat_max: 255
+  val_min: 70
+  val_max: 255
+  morph_kernel_px: 5
+  morph_open_iterations: 1
+  morph_close_iterations: 2
+  min_area_px: 400
+  max_area_px: 400000
+  min_aspect: 0.5            # w/h
+  max_aspect: 2.0
+  min_solidity: 0.80
+  box_width_m: 0.30          # known target width, drives range_size
+  min_confidence: 0.30
+
+occupancy:
+  n_bins: 32                 # must equal obstacles.n_bins
+  fov_deg: 65.0              # must equal obstacles.fov_deg
+  # Bins older than this are unknown again. Never clear.
+  max_age_s: 2.0
+  # Confidence multiplier per second of age, applied before max_age_s.
+  age_decay_per_s: 0.5
+  # A bin must hold at least this confidence to count as observed.
+  min_confidence: 0.15
+  # danger[i] = distance[i] < reaction_s * speed + speed^2 / (2 * decel) + margin_m
+  danger_reaction_s: 0.4
+  danger_decel_mps2: 2.5
+  danger_margin_m: 1.0
+
+local_planner:
+  # VFH-lite. A candidate heading is a bin with clearance > threshold and
+  # unknown == False. Cost = w_goal*|angle_to_goal| + w_clear/clearance
+  #                        + w_turn*|turn_rate|
+  clearance_threshold_m: 2.5
+  w_goal: 1.0
+  w_clearance: 4.0
+  w_turn: 0.5
+  max_yaw_rate_dps: 60.0
+  # Clearance is floored at this before dividing, so the term stays finite.
+  min_clearance_for_cost_m: 0.25
+
+behaviours:
+  # Speed clamp applied on entry to ANY autonomous state.
+  autonomy_speed_max_mps: 2.5
+  search_yaw_rate_dps: 25.0
+  search_timeout_s: 30.0
+  approach_speed_mps: 1.5
+  standoff_m: 2.0
+  arrive_tolerance_m: 0.4
+  # Target must be seen this many consecutive ticks before APPROACH.
+  acquire_consecutive_ticks: 3
+  # Target lost for this long during APPROACH drops back to SEARCH.
+  lost_target_timeout_s: 2.0
+
+offboard:
+  rate_hz: 20.0
+  # Slew limits applied to the command stream.
+  max_accel_mps2: 2.0
+  max_yaw_accel_dps2: 180.0
+  # No fresh PlannerCommand for this long -> zero velocity.
+  command_timeout_s: 0.5
+
+mavlink:
+  endpoint: "udp:127.0.0.1:14550"
+  source_system: 255
+  source_component: 190
+  heartbeat_timeout_s: 5.0
+  # set_message_interval on connect, Hz.
+  stream_rates_hz:
+    ATTITUDE: 50
+    LOCAL_POSITION_NED: 10
+    DISTANCE_SENSOR: 10
+    SYS_STATUS: 2
+    RC_CHANNELS: 5
+  # Attitude ring buffer for attitude_at(t_ns) interpolation.
+  attitude_buffer_len: 512
+  # attitude_at() refuses to extrapolate further than this beyond the buffer.
+  attitude_max_extrapolation_s: 0.05
+
+flightlog:
+  root: runs
+  # Frames are written as the received MJPG bitstream; no re-encode.
+  write_frames: true
+  # fsync the JSONL indices every N records (0 = never).
+  fsync_every: 0

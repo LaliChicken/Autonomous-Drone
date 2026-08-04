@@ -1,0 +1,36 @@
+[project]
+name = "drone-autonomy"
+version = "0.1.0"
+description = "Companion-computer perception -> planning -> offboard-control stack for a 7\" quadcopter."
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "pymavlink",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# sources/types.py is the frozen contract. It is reproduced verbatim from the
+# spec and must not be reformatted, so the style rules its layout trips are
+# waived here rather than by editing the file.
+"sources/types.py" = ["E701", "E702", "I001"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "sitl: requires a running ArduPilot SITL instance",
+    "hw: requires physical hardware (camera / flight controller)",
+]
