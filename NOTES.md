@@ -129,3 +129,89 @@ that this should call into `stereo_uvc` once it exists — two places deciding w
 the midline is, is one too many.
 
 **`infra/netview.py` was left empty**: not part of the Package A brief.
+
+## Package B decisions — depth
+
+**Invalid depth is NaN, not 0.0 and not clipped.** CLAUDE.md forbids `depth_m=0.0`;
+NaN is the positive choice rather than merely a non-zero one, because every
+comparison against NaN is False. A pixel that leaks past a `valid` check still
+fails "is this closer than X" instead of passing it, which is the safe direction.
+`blank_invalid()` is the last line of defence and runs unconditionally.
+Out-of-range depths are *invalidated, not clipped* — clipping would turn a 40 m
+reading into a confident 12 m obstacle.
+
+**Zero disparity is treated as unmeasurable, not as a match.** OpenCV marks
+unmatched pixels `(minDisparity-1)*16`, but a matched disparity of exactly zero is
+the point at infinity and reprojects to an enormous Z that would sail through the
+range clamp looking like a real measurement. `disparity_valid_mask` requires both
+conditions.
+
+**Speckle removal lives in the disparity domain and its threshold is in disparity
+pixels.** Two reasons. `cv2.filterSpeckles` rejects float32 outright in OpenCV 5
+(int16/uint8 only), and more fundamentally a fixed metre tolerance maps to a
+different disparity step at every range, so `speckle_max_diff_m` was not an
+honestly expressible tunable. Renamed to `speckle_max_diff_px`.
+
+**`remove_speckles` copies explicitly.** `np.ascontiguousarray` returns the *input
+object* when it is already contiguous int16, and `filterSpeckles` works in place,
+so the first version silently modified its caller's disparity map. Caught by a test
+that asserts the input is unchanged, which is worth keeping.
+
+**The L/R consistency check abstains where it cannot see — this was the important
+decision in this package.** The right-view disparity map is structurally invalid
+over its rightmost `numDisparities` columns; that is a consequence of the search
+direction, not a data problem, and no configuration avoids it. Treating "could not
+check" as "failed the check" blanked ~10% of the image width at the right edge of
+*every* frame. Measured on a planar scene, coverage in the right third fell to
+essentially nothing. Downstream those azimuth bins would be permanently `unknown`,
+and since unknown is impassable, **the planner could never turn right**. Abstaining
+is not "unknown = clear": the pixel still carries real evidence from the forward
+match, it simply has no second opinion available. With abstention the check earns
+its cost cleanly — on the occlusion scene, leak 5.0% → 3.2% and depth RMSE
+0.058 → 0.051 m, for 0.09 points of coverage and no edge asymmetry.
+
+**Confidence is a geometric bound, not a match score.** Differentiating Z = f·B/d
+gives σ_Z = Z²·σ_d/(f·B), so range error grows with the *square* of range — the
+dominant fact about stereo. Confidence falls linearly to zero at
+`max_depth_sigma_m`. It says how precise a correct match can be at that range, not
+how likely the match is to be right; those are different questions and conflating
+them would overstate what the number means.
+
+**The synthetic generator builds the pair *from* the disparity, not by shifting the
+left image.** The right image is a window into a padded texture and the left image
+is the same window displaced, so disparity is an input rather than something
+recovered, and both views are exact texture crops with no resampling blur to
+flatter the matcher. `tests/test_synthetic_stereo.py` verifies the pairs against
+their own ground truth by direct pixel comparison, never through StereoSGBM — a
+generator that disagreed with its own GT would make every downstream number
+meaningless.
+
+**The first occlusion scene was not one.** Displacing a region of a single
+continuous texture occludes nothing: the right view stays consistent with both the
+near and the far interpretation, the matcher finds a background match that
+genuinely agrees in both views, and there is nothing for a consistency check to
+catch. The measured "leak" was an artefact of that. The slab now carries its own
+independent texture, which makes the occlusion real and gives the L/R check
+something true to find.
+
+**The committed baseline is measured on synthetic scenes, deliberately.**
+`vision.middlebury.edu` is unreachable from this environment (its TLS chain does
+not verify here; general network is fine), but even with access the baseline
+belongs on data that needs no download — CI can then check it offline and
+reproducibly. `tools/get_middlebury.py` is written and its parsing is fully tested
+against local fixtures, but **the download path has never executed end to end**;
+there is a `# QUESTION(rahul):` on it asking for one manual run.
+
+**Honest limitation: the synthetic scenes are too easy.** `bad_pixel_pct` is 0.00
+on three of four, so that metric currently has no headroom to detect a regression.
+`disparity_rmse_px`, `coverage_pct`, and `occlusion_leak_pct` do carry real signal
+and are what the guard actually rests on. Real Middlebury scenes would fix this.
+
+**Timing, unprompted but relevant: full resolution does not hit 30 Hz on this CPU.**
+At 1280×720 with 128 disparities, `SgbmCpuBackend.infer` is ~86 ms with the L/R
+check and ~53 ms without — 11.6 Hz and 18.9 Hz, on a desktop x86 part. A Jetson
+Orin Nano CPU will be slower. `depth/sgm_jetson.py` (the presumable CUDA path) is
+an empty stub and was not in packages A–D. Flagged rather than acted on.
+
+**`depth/backends.py` and `depth/holepunch.py` untouched** — owned stubs.
+`SgbmCpuBackend` satisfies the `DepthBackend` protocol structurally.

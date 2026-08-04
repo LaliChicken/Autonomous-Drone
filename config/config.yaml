@@ -56,10 +56,19 @@ depth:
   postprocess:
     min_depth_m: 0.4
     max_depth_m: 12.0
+    # Speckle removal runs in the disparity domain, which is where OpenCV's
+    # filterSpeckles lives and where the threshold is meaningful: a fixed
+    # metre tolerance maps to a different disparity step at every range, so
+    # it cannot be a single number. Units are disparity pixels.
     speckle_max_area_px: 200
-    speckle_max_diff_m: 0.25
+    speckle_max_diff_px: 2.0
     lr_consistency: true
     lr_max_disp_diff_px: 1.5
+    # Confidence model: a disparity error of disparity_sigma_px pixels implies
+    # a depth error sigma_Z = Z^2 * sigma_d / (f * B). Confidence is 1.0 at
+    # zero error and falls linearly to 0.0 at max_depth_sigma_m.
+    disparity_sigma_px: 0.5
+    max_depth_sigma_m: 1.5
     # Confidence below this is treated as invalid.
     min_confidence: 0.0
 
@@ -160,6 +169,18 @@ mavlink:
   attitude_buffer_len: 512
   # attitude_at() refuses to extrapolate further than this beyond the buffer.
   attitude_max_extrapolation_s: 0.05
+
+bench:
+  # tools/bench.py. A pixel counts as bad if its disparity is off by more than
+  # this; 2.0 px is the Middlebury convention.
+  bad_pixel_threshold_px: 2.0
+  # Committed baseline, relative to the repo root.
+  baseline_path: tools/depth_baseline.json
+  # tools/bench.py --check fails if a metric regresses by more than this
+  # fraction of the baseline value.
+  regression_tolerance: 0.10
+  # Where get_middlebury.py puts data, relative to the repo root.
+  middlebury_dir: data/middlebury
 
 metrics:
   # Per-stage ring-buffer length used for the p50/p99 rollups. Bounded so a

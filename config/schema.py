@@ -226,9 +226,11 @@ class PostprocessConfig:
     min_depth_m: float
     max_depth_m: float
     speckle_max_area_px: int
-    speckle_max_diff_m: float
+    speckle_max_diff_px: float
     lr_consistency: bool
     lr_max_disp_diff_px: float
+    disparity_sigma_px: float
+    max_depth_sigma_m: float
     min_confidence: float
 
     def validate(self) -> None:
@@ -241,7 +243,16 @@ class PostprocessConfig:
             self.speckle_max_area_px >= 0, "depth.postprocess.speckle_max_area_px must be >= 0"
         )
         _require(
+            self.speckle_max_diff_px > 0.0, "depth.postprocess.speckle_max_diff_px must be > 0"
+        )
+        _require(
             self.lr_max_disp_diff_px > 0.0, "depth.postprocess.lr_max_disp_diff_px must be > 0"
+        )
+        _require(
+            self.disparity_sigma_px > 0.0, "depth.postprocess.disparity_sigma_px must be > 0"
+        )
+        _require(
+            self.max_depth_sigma_m > 0.0, "depth.postprocess.max_depth_sigma_m must be > 0"
         )
         _require(
             0.0 <= self.min_confidence <= 1.0,
@@ -468,6 +479,22 @@ class MavlinkConfig:
 
 
 @dataclass(frozen=True)
+class BenchConfig:
+    bad_pixel_threshold_px: float
+    baseline_path: str
+    regression_tolerance: float
+    middlebury_dir: str
+
+    def validate(self) -> None:
+        _require(self.bad_pixel_threshold_px > 0.0, "bench.bad_pixel_threshold_px must be > 0")
+        _require(bool(self.baseline_path), "bench.baseline_path must not be empty")
+        _require(
+            self.regression_tolerance >= 0.0, "bench.regression_tolerance must be >= 0"
+        )
+        _require(bool(self.middlebury_dir), "bench.middlebury_dir must not be empty")
+
+
+@dataclass(frozen=True)
 class MetricsConfig:
     window: int
 
@@ -499,6 +526,7 @@ class Config:
     behaviours: BehavioursConfig
     offboard: OffboardConfig
     mavlink: MavlinkConfig
+    bench: BenchConfig
     metrics: MetricsConfig
     flightlog: FlightlogConfig
     source_path: str = field(default="", compare=False)
@@ -597,6 +625,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     beh = _section(raw, "behaviours")
     off = _section(raw, "offboard")
     mav = _section(raw, "mavlink")
+    ben = _section(raw, "bench")
     met = _section(raw, "metrics")
     log = _section(raw, "flightlog")
 
@@ -648,9 +677,11 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
                 min_depth_m=float(_get(post, "min_depth_m", "depth.postprocess")),
                 max_depth_m=float(_get(post, "max_depth_m", "depth.postprocess")),
                 speckle_max_area_px=int(_get(post, "speckle_max_area_px", "depth.postprocess")),
-                speckle_max_diff_m=float(_get(post, "speckle_max_diff_m", "depth.postprocess")),
+                speckle_max_diff_px=float(_get(post, "speckle_max_diff_px", "depth.postprocess")),
                 lr_consistency=bool(_get(post, "lr_consistency", "depth.postprocess")),
                 lr_max_disp_diff_px=float(_get(post, "lr_max_disp_diff_px", "depth.postprocess")),
+                disparity_sigma_px=float(_get(post, "disparity_sigma_px", "depth.postprocess")),
+                max_depth_sigma_m=float(_get(post, "max_depth_sigma_m", "depth.postprocess")),
                 min_confidence=float(_get(post, "min_confidence", "depth.postprocess")),
             ),
         ),
@@ -731,6 +762,12 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
             attitude_max_extrapolation_s=float(
                 _get(mav, "attitude_max_extrapolation_s", "mavlink")
             ),
+        ),
+        bench=BenchConfig(
+            bad_pixel_threshold_px=float(_get(ben, "bad_pixel_threshold_px", "bench")),
+            baseline_path=str(_get(ben, "baseline_path", "bench")),
+            regression_tolerance=float(_get(ben, "regression_tolerance", "bench")),
+            middlebury_dir=str(_get(ben, "middlebury_dir", "bench")),
         ),
         metrics=MetricsConfig(
             window=int(_get(met, "window", "metrics")),

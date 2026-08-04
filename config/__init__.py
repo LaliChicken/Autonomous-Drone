@@ -3,6 +3,7 @@
 from config.schema import (
     DEFAULT_CONFIG_PATH,
     BehavioursConfig,
+    BenchConfig,
     CameraConfig,
     Config,
     ConfigError,
@@ -26,6 +27,7 @@ from config.schema import (
 __all__ = [
     "DEFAULT_CONFIG_PATH",
     "BehavioursConfig",
+    "BenchConfig",
     "CameraConfig",
     "Config",
     "ConfigError",
