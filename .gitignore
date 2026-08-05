@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Datasets are fetched by tools/get_middlebury.py, never committed.
+data/
+
+# Flight logs and replay output are run artefacts.
+runs/
+
+# Claude Code local settings and their write-temp files
+.claude/settings.local.json
+.claude/*.tmp.*

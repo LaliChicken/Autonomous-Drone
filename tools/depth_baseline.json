@@ -1,0 +1,91 @@
+{
+  "aggregate": {
+    "bad_pixel_pct": 0.0312058652472903,
+    "completeness_pct": 83.0706899660873,
+    "coverage_pct": 79.32576497395833,
+    "depth_mae_m": 0.0029669137165910797,
+    "depth_rmse_m": 0.016448578742711106,
+    "disparity_rmse_px": 0.2784529817290604,
+    "occlusion_leak_pct": 0.8101851851851851
+  },
+  "bad_pixel_threshold_px": 2.0,
+  "depth_config": {
+    "postprocess": {
+      "disparity_sigma_px": 0.5,
+      "lr_consistency": true,
+      "lr_max_disp_diff_px": 1.5,
+      "max_depth_m": 12.0,
+      "max_depth_sigma_m": 1.5,
+      "min_confidence": 0.0,
+      "min_depth_m": 0.4,
+      "speckle_max_area_px": 200,
+      "speckle_max_diff_px": 2.0
+    },
+    "sgbm": {
+      "block_size": 5,
+      "disp12_max_diff": 1,
+      "min_disparity": 0,
+      "mode_sgbm_3way": true,
+      "num_disparities": 128,
+      "p1": null,
+      "p2": null,
+      "pre_filter_cap": 63,
+      "speckle_range": 2,
+      "speckle_window_size": 100,
+      "uniqueness_ratio": 10
+    }
+  },
+  "generated_by": "tools/bench.py",
+  "opencv_version": "5.0.0",
+  "scene_source": "tools.synthetic_stereo.default_scenes",
+  "scenes": {
+    "occlusion": {
+      "bad_pixel_pct": 0.12441627331228905,
+      "completeness_pct": 80.51460634611219,
+      "coverage_pct": 77.51790364583333,
+      "depth_mae_m": 0.0024781879037618637,
+      "depth_rmse_m": 0.05144305154681206,
+      "disparity_rmse_px": 0.8420245051383972,
+      "gt_px": 295488,
+      "occlusion_leak_pct": 3.2407407407407405,
+      "scene": "occlusion",
+      "scored_px": 237911
+    },
+    "planar_far": {
+      "bad_pixel_pct": 0.0,
+      "completeness_pct": 81.97282318376068,
+      "coverage_pct": 79.92350260416666,
+      "depth_mae_m": 0.0002384350955253467,
+      "depth_rmse_m": 0.001351030427031219,
+      "disparity_rmse_px": 0.016603469848632812,
+      "gt_px": 299520,
+      "occlusion_leak_pct": 0.0,
+      "scene": "planar_far",
+      "scored_px": 245525
+    },
+    "planar_near": {
+      "bad_pixel_pct": 0.0004071876768721472,
+      "completeness_pct": 86.4256052927928,
+      "coverage_pct": 79.94368489583333,
+      "depth_mae_m": 2.6118614186998457e-05,
+      "depth_rmse_m": 0.00015212305879686028,
+      "disparity_rmse_px": 0.016711371019482613,
+      "gt_px": 284160,
+      "occlusion_leak_pct": 0.0,
+      "scene": "planar_near",
+      "scored_px": 245587
+    },
+    "slanted": {
+      "bad_pixel_pct": 0.0,
+      "completeness_pct": 83.36972504168351,
+      "coverage_pct": 79.91796875,
+      "depth_mae_m": 0.00912491325289011,
+      "depth_rmse_m": 0.012848109938204288,
+      "disparity_rmse_px": 0.238472580909729,
+      "gt_px": 294481,
+      "occlusion_leak_pct": 0.0,
+      "scene": "slanted",
+      "scored_px": 245508
+    }
+  }
+}
