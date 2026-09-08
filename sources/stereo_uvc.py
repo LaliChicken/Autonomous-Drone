@@ -131,7 +131,7 @@ def _capture_worker(
                 raise CaptureError("capture timestamps must increase monotonically")
             last_t_ns = t_ns
             with lock:
-                slot[:len(packet)] = packet
+                memoryview(slot).cast('B')[:len(packet)] = packet
                 header[:] = (seq, t_ns, len(packet))
                 ready.set()
             seq += 1
@@ -191,7 +191,7 @@ class StereoCapture:
                 raise CaptureError(f"capture worker exited: {self._process.exitcode}")
             with self._lock:
                 seq, t_ns, size = self._header[:]
-                packet = bytes(self._slot[:size])
+                packet = bytes(memoryview(self._slot).cast('B')[:size])
                 self._ready.clear()
             if seq <= self._last_seq:
                 raise CaptureError("capture worker failed without a fresh frame")

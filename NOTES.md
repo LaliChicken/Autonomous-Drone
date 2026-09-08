@@ -479,3 +479,35 @@ Validation: 492 passed, 6 opt-in tests skipped; Ruff clean; depth benchmark has 
 regressions. New tests drive real synthetic MJPG through depth, detection, planning,
 logging and byte-identical replay, including authority loss, reset, stale independent
 sensors, moving frames, frame-byte limits, source/depth faults and portable calibration.
+
+## Package H decisions — deployment and acceptance evidence
+
+Added a filtered Nix application package requiring an explicit, proven JetPack
+Python environment and a disabled-by-default NixOS service. The service owns its
+capture subprocesses, grants configured device groups, writes a state directory,
+and does not auto-restart on faults or recording limits. Both Nix files parse;
+this workstation has no configured nixpkgs evaluation environment. No Jetson build,
+service activation or CUDA environment substitution was performed. Aggregate log
+retention remains a deployment policy; the application never deletes recordings.
+
+Run metadata now includes interpreter/OpenCV/NumPy versions and the deployment
+build id. Replay checks the calibration snapshot hash. Shared-memory packet copying
+uses byte views to avoid constructing per-byte Python lists. Added usage and
+completion/dependency documentation and an explicit physical-camera opt-in test.
+
+Validation: 492 passed, 8 opt-in tests skipped; Ruff clean; committed synthetic depth
+benchmark has no regressions. A five-frame CLI smoke recording replayed identically.
+The six existing SITL scenarios passed in 33.90 s against the local built simulator,
+normally armed in GUIDED and taken off to 5 m. The new record-only SITL telemetry /
+CPU pipeline / replay test passed separately in 2.96 s. Its first run against a
+freshly restarted, unprepared simulator failed for missing essential telemetry;
+reaching the documented airborne precondition resolved that failure. No assertion
+was weakened; failure diagnostics now include received message counts. Simulator
+processes were stopped after testing. No physical camera or flight controller was
+accessed, and no physical flight validation is claimed.
+
+Remaining work is explicit in docs/COMPLETION_STATUS.md: missing CUDA patch/results,
+physical capture/calibration/timing measurements, owned safety and validation
+modules, forward-range fusion and ground masking, Jetson build/deployment/retention,
+loaded-power/assembly checks and controlled flight acceptance. Ownership restrictions
+and the frozen sources/types.py contract remain in force.

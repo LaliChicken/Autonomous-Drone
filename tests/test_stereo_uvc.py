@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import cv2
 import numpy as np
@@ -74,7 +75,7 @@ def test_odd_and_empty_images() -> None:
             split_side_by_side(np.zeros(shape, dtype=np.uint8))
 
 
-def test_latest_frame_and_original_bytes(cfg_from) -> None:
+def test_latest_frame_and_original_bytes(cfg_from: Any) -> None:
     cfg = cfg_from({'camera': {'frame_width': 64, 'frame_height': 24}})
     with StereoCapture(cfg, SyntheticTransport) as source:
         first = source.read()
@@ -88,7 +89,7 @@ def test_latest_frame_and_original_bytes(cfg_from) -> None:
 
 
 @pytest.mark.parametrize('factory', [BadTransport, DisconnectTransport])
-def test_fault_latches(cfg_from, factory) -> None:
+def test_fault_latches(cfg_from: Any, factory: Any) -> None:
     cfg = cfg_from({'camera': {'frame_width': 64, 'frame_height': 24}})
     with StereoCapture(cfg, factory) as source:
         with pytest.raises(CaptureError):
@@ -97,7 +98,7 @@ def test_fault_latches(cfg_from, factory) -> None:
             source.read()
 
 
-def test_stall_has_bounded_shutdown(cfg_from) -> None:
+def test_stall_has_bounded_shutdown(cfg_from: Any) -> None:
     cfg = cfg_from({'capture': {'timeout_s': 0.5, 'shutdown_timeout_s': 0.1}})
     start = time.monotonic()
     with StereoCapture(cfg, StalledTransport) as source:
@@ -113,7 +114,7 @@ def test_actual_resolution_is_checked(cfg: Config) -> None:
             source.read()
 
 
-def test_capture_config_validation_and_old_logs(mutable_config) -> None:
+def test_capture_config_validation_and_old_logs(mutable_config: Any) -> None:
     del mutable_config['capture']
     assert load_config_from_dict(mutable_config).capture.timeout_s > 0
     mutable_config['capture'] = {
@@ -122,3 +123,18 @@ def test_capture_config_validation_and_old_logs(mutable_config) -> None:
     }
     with pytest.raises(ConfigError, match='timeout_s'):
         load_config_from_dict(mutable_config)
+
+
+@pytest.mark.hw
+def test_real_uvc_capture() -> None:
+    import os
+
+    from config import load_config
+
+    cfg = load_config(os.environ.get('DRONE_CONFIG'))
+    with StereoCapture(cfg) as source:
+        a, b = source.read(), source.read()
+        assert b.bundle.seq > a.bundle.seq
+        assert b.bundle.t_ns > a.bundle.t_ns
+        assert a.bundle.left.shape == (cfg.camera.eye_height, cfg.camera.eye_width, 3)
+        assert a.mjpg.startswith(b'\xff\xd8')

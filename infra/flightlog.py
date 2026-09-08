@@ -420,6 +420,11 @@ class FlightLogReader:
         calibration = raw.get("camera", {}).get("calibration_npz")
         if calibration is not None and not Path(calibration).is_absolute():
             raw["camera"]["calibration_npz"] = str((self.run_dir / calibration).resolve())
+        expected_hash = self.meta.get("calibration_sha256")
+        if expected_hash and calibration is not None:
+            artifact = Path(raw["camera"]["calibration_npz"])
+            if hashlib.sha256(artifact.read_bytes()).hexdigest() != expected_hash:
+                raise FlightLogError("recorded calibration hash mismatch")
         return load_config_from_dict(raw, str(self.run_dir / CONFIG_YAML_NAME))
 
     def _iter_jsonl(self, name: str) -> Iterator[dict[str, Any]]:

@@ -1,16 +1,19 @@
 """Use projected physical geometry to check the real OpenCV solver and rectifier."""
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import cv2
 import numpy as np
 import pytest
 
 from calib.rectify import Rectifier
 from calib.solve import board_points, solve_points
-from config import ConfigError
+from config import Config, ConfigError
 
 
-def observations(cfg):
+def observations(cfg: Config) -> tuple[list[np.ndarray], list[np.ndarray]]:
     points = board_points(cfg.calibration)
     k = np.array([[500., 0., 319.5], [0., 500., 239.5], [0., 0., 1.]])
     left, right = [], []
@@ -26,19 +29,19 @@ def observations(cfg):
 
 
 @pytest.fixture
-def solved(cfg_from):
+def solved(cfg_from: Any) -> tuple[Config, dict[str, np.ndarray]]:
     cfg = cfg_from({'camera': {'frame_width': 1280, 'frame_height': 480},
                     'calibration': {'columns': 7, 'rows': 5, 'square_m': 0.025, 'min_pairs': 8}})
     a, b = observations(cfg)
     return cfg, solve_points(a, b, (640, 480), cfg)
 
 
-def test_unmeasured_board_is_rejected(cfg) -> None:
+def test_unmeasured_board_is_rejected(cfg: Config) -> None:
     with pytest.raises(ConfigError, match='measured'):
         board_points(cfg.calibration)
 
 
-def test_real_solver_recovers_geometry_and_does_not_validate(solved, tmp_path) -> None:
+def test_real_solver_recovers_geometry_and_does_not_validate(solved: Any, tmp_path: Path) -> None:
     cfg, data = solved
     assert np.linalg.norm(data['T']) == pytest.approx(0.052, abs=1e-4)
     assert data['fit_rms_px'].max() < 0.01
@@ -56,7 +59,7 @@ def test_real_solver_recovers_geometry_and_does_not_validate(solved, tmp_path) -
                        cfg.mount.rotation_body_from_cam(), atol=1e-3)
 
 
-def test_missing_or_wrong_resolution_calibration_rejected(solved, tmp_path) -> None:
+def test_missing_or_wrong_resolution_calibration_rejected(solved: Any, tmp_path: Path) -> None:
     cfg, data = solved
     path = tmp_path / 'bad.npz'
     np.savez(path, Q=data['Q'])
@@ -68,7 +71,7 @@ def test_missing_or_wrong_resolution_calibration_rejected(solved, tmp_path) -> N
         Rectifier(path, cfg)
 
 
-def test_corrupt_rotation_and_maps_rejected(solved, tmp_path) -> None:
+def test_corrupt_rotation_and_maps_rejected(solved: Any, tmp_path: Path) -> None:
     cfg, data = solved
     path = tmp_path / 'bad.npz'
     for field in ['R1', 'left_x', 'Q']:
@@ -79,7 +82,7 @@ def test_corrupt_rotation_and_maps_rejected(solved, tmp_path) -> None:
             Rectifier(path, cfg)
 
 
-def test_solver_requires_matching_diverse_sample_count(cfg_from) -> None:
+def test_solver_requires_matching_diverse_sample_count(cfg_from: Any) -> None:
     cfg = cfg_from({'calibration': {'columns': 7, 'rows': 5, 'square_m': 0.025}})
     with pytest.raises(ConfigError, match='matched'):
         solve_points([], [], (1280, 720), cfg)

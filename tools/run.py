@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
 import signal
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -80,9 +82,12 @@ def record_frames(
             raise
         finally:
             log.write_metrics(metrics)
-            summary = dict(mode='record_only', source=source, status=status, error=error,
+            summary = dict(build_id=os.environ.get('DRONE_BUILD_ID'),
+                           python=platform.python_version(), opencv=cv2.__version__,
+                           numpy=np.__version__, mode='record_only', source=source,
+                           status=status, error=error,
                            processed_frames=count, dropped_frames=dropped,
-                           encoded_bytes=encoded_bytes, commands_transmitted=0,
+                           encoded_bytes=encoded_bytes, setpoints_transmitted=0,
                            timestamp_source=('synthetic_monotonic' if source == 'synthetic'
                                              else 'host_dequeue_monotonic'),
                            elapsed_s=(time.monotonic_ns() - started) / 1e9)
@@ -95,13 +100,13 @@ def live_frames(source: StereoCapture) -> Iterator[CapturedFrame]:
         yield source.read()
 
 
-def synthetic_frames(cfg: Config) -> Iterator[CapturedFrame]:
+def synthetic_frames(cfg: Config, count: int | None = None) -> Iterator[CapturedFrame]:
     scene = planar_scene(height=cfg.camera.eye_height, width=cfg.camera.eye_width)
     ok, encoded = cv2.imencode('.jpg', np.concatenate([scene.left, scene.right], axis=1))
     if not ok:
         raise RuntimeError('synthetic JPEG encoding failed')
     packet = encoded.tobytes()
-    for seq in range(cfg.runtime.synthetic_frames):
+    for seq in range(cfg.runtime.synthetic_frames if count is None else count):
         t_ns = time.monotonic_ns()
         yield CapturedFrame(decode_mjpg(packet, seq, t_ns), packet, 0, 'synthetic_monotonic')
 
@@ -141,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == 'synthetic':
             if cfg.camera.calibration_npz is not None:
                 parser.error('synthetic images require nominal geometry (calibration_npz=null)')
-            record_frames(cfg, synthetic_frames(cfg), root=args.output_root,
+            record_frames(cfg, synthetic_frames(cfg, args.frames), root=args.output_root,
                           limit=args.frames, source='synthetic')
         else:
             if cfg.camera.calibration_npz is None:
