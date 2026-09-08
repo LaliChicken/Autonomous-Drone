@@ -48,6 +48,21 @@ class EnvelopeConfig:
 
 
 @dataclass(frozen=True)
+class CaptureConfig:
+    device_path: str | None
+    timeout_s: float
+    shutdown_timeout_s: float
+    max_packet_bytes: int
+
+    def validate(self) -> None:
+        _require(self.device_path is None or bool(self.device_path), "capture.device_path is empty")
+        for name in ("timeout_s", "shutdown_timeout_s"):
+            value = getattr(self, name)
+            _require(math.isfinite(value) and value > 0, f"capture.{name} must be finite and > 0")
+        _require(self.max_packet_bytes > 0, "capture.max_packet_bytes must be > 0")
+
+
+@dataclass(frozen=True)
 class CameraConfig:
     """Side-by-side stereo UVC device, split at the vertical midline."""
 
@@ -531,6 +546,7 @@ class Config:
     bench: BenchConfig
     metrics: MetricsConfig
     flightlog: FlightlogConfig
+    capture: CaptureConfig
     source_path: str = field(default="", compare=False)
     # The YAML-shaped mapping this Config was built from, kept verbatim so a
     # flight log can snapshot something that loads straight back through
@@ -614,6 +630,12 @@ def _deg(section: dict[str, Any], name: str, path: str) -> float:
 
 
 def _build(raw: dict[str, Any], source_path: str) -> Config:
+    # Old run snapshots predate capture. Take additive defaults from the shipped
+    # YAML, keeping tunables in one place and old logs replayable.
+    raw = copy.deepcopy(raw)
+    if "capture" not in raw:
+        with DEFAULT_CONFIG_PATH.open(encoding="utf-8") as handle:
+            raw["capture"] = yaml.safe_load(handle)["capture"]
     env = _section(raw, "envelope")
     cam = _section(raw, "camera")
     mount = _section(raw, "mount")
@@ -630,6 +652,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     ben = _section(raw, "bench")
     met = _section(raw, "metrics")
     log = _section(raw, "flightlog")
+    capture = _section(raw, "capture")
 
     rates = _get(mav, "stream_rates_hz", "mavlink")
     if not isinstance(rates, dict):
@@ -638,6 +661,12 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     calib = _get(cam, "calibration_npz", "camera")
 
     return Config(
+        capture=CaptureConfig(
+            device_path=capture["device_path"],
+            timeout_s=float(capture["timeout_s"]),
+            shutdown_timeout_s=float(capture["shutdown_timeout_s"]),
+            max_packet_bytes=int(capture["max_packet_bytes"]),
+        ),
         envelope=EnvelopeConfig(
             max_speed_mps=float(_get(env, "max_speed_mps", "envelope")),
             max_agl_m=float(_get(env, "max_agl_m", "envelope")),

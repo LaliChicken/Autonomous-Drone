@@ -28,7 +28,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-import cv2
 import numpy as np
 
 from infra.flightlog import (
@@ -64,37 +63,23 @@ PipelineFactory = Callable[["Config"], ReplayPipeline]
 
 
 def split_side_by_side(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Split a side-by-side stereo frame at the vertical midline.
+    """Compatibility wrapper around the live source's split rule."""
+    from sources.stereo_uvc import CaptureError
+    from sources.stereo_uvc import split_side_by_side as split
 
-    Splits at the midline of the *actual* decoded frame rather than at
-    ``config.camera.frame_width / 2``. A log may legitimately hold a different
-    resolution than the current config (an older run, a synthetic fixture),
-    and silently slicing at the configured width would hand the pipeline two
-    misaligned half-images instead of failing.
-    """
-    if frame.ndim < 2:
-        raise ReplayError(f"expected an image, got shape {frame.shape}")
-    width = frame.shape[1]
-    if width % 2 != 0:
-        raise ReplayError(f"side-by-side frame width must be even, got {width}")
-    half = width // 2
-    return frame[:, :half], frame[:, half:]
+    try:
+        return split(frame)
+    except CaptureError as exc:
+        raise ReplayError(str(exc)) from exc
 
 
 def decode_frame(record: FrameRecord) -> FrameBundle:
-    """MJPG bitstream -> FrameBundle, exactly as the live source would deliver it.
+    from sources.stereo_uvc import CaptureError, decode_mjpg
 
-    # QUESTION(rahul): sources/stereo_uvc.py is still empty and was not part of
-    # packages A-D, so the decode-and-split step lives here. Once stereo_uvc
-    # exists, this should call into it rather than keeping a second copy of the
-    # split rule -- two places that decide where the midline is, is one too many.
-    """
-    buffer = np.frombuffer(record.mjpg, dtype=np.uint8)
-    frame = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
-    if frame is None:
-        raise ReplayError(f"frame seq={record.seq} is not decodable MJPG")
-    left, right = split_side_by_side(frame)
-    return FrameBundle(left=left, right=right, t_ns=record.t_ns, seq=record.seq)
+    try:
+        return decode_mjpg(record.mjpg, record.seq, record.t_ns)
+    except CaptureError as exc:
+        raise ReplayError(str(exc)) from exc
 
 
 class TelemetryTrack:

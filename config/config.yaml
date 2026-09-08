@@ -25,6 +25,12 @@ camera:
   # See QUESTION(rahul) in config/schema.py.
   calibration_npz: null
 
+capture:
+  device_path: null         # Prefer /dev/v4l/by-id/...; null uses camera.device_index
+  timeout_s: 5.0            # Includes startup; a stalled read is a terminal fault
+  shutdown_timeout_s: 1.0
+  max_packet_bytes: 8388608 # Fixed shared-memory slot, never an unbounded queue
+
 mount:
   # Camera pose in the body frame (FRD). Translation is the camera optical
   # centre relative to the body origin, metres. Rotation is applied on top of

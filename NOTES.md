@@ -409,3 +409,23 @@ Validation: 467 passed, 6 opt-in tests skipped; project-scoped Ruff clean;
 are absent from local branches and the searched workspace. Their recovery and
 Jetson measurements remain external dependencies; historical counts are not
 results from this checkout.
+
+## Package E decisions — live stereo source
+
+Capture owns one bounded shared-memory MJPG slot in a spawned process. Blocking
+OpenCV calls can be terminated on shutdown; the consumer never waits through a
+backlog. Sequence gaps expose discarded frames. Invalid formats, shape changes,
+non-monotonic timestamps, disconnects and timeouts latch a fault until restart.
+Raw bytes are preserved and replay now delegates to the source's decoder/splitter.
+Existing log configs acquire additive capture defaults from the shipped YAML.
+
+The OpenCV V4L2 transport is unverified on the actual camera. Its timestamps are
+explicitly host-dequeue CLOCK_MONOTONIC, not exposure timestamps. The frozen frame
+contract is unchanged; latency from these timestamps excludes earlier device
+buffering. Flight use remains blocked on timestamp verification. Raw logging
+requires MJPG; a decoded BGR fallback is deliberately not re-encoded.
+
+Validation: 477 passed, 6 opt-in tests skipped. New tests exercise real spawned
+workers with synthetic transport, latest-frame delivery, original byte retention,
+decode/replay equivalence, disconnects, corrupt packets, shape mismatch and bounded
+shutdown of a stalled read. No physical camera was opened.
