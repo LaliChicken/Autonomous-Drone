@@ -48,6 +48,23 @@ class EnvelopeConfig:
 
 
 @dataclass(frozen=True)
+class RuntimeConfig:
+    telemetry_buffer_len: int
+    telemetry_timeout_s: float
+    range_timeout_s: float
+    max_run_bytes: int
+    max_duration_s: float
+    synthetic_frames: int
+
+    def validate(self) -> None:
+        for name in ("telemetry_buffer_len", "max_run_bytes", "synthetic_frames"):
+            _require(getattr(self, name) > 0, f"runtime.{name} must be > 0")
+        for name in ("telemetry_timeout_s", "range_timeout_s", "max_duration_s"):
+            value = getattr(self, name)
+            _require(math.isfinite(value) and value > 0, f"runtime.{name} must be finite and > 0")
+
+
+@dataclass(frozen=True)
 class CalibrationConfig:
     columns: int | None
     rows: int | None
@@ -573,6 +590,7 @@ class Config:
     flightlog: FlightlogConfig
     capture: CaptureConfig
     calibration: CalibrationConfig
+    runtime: RuntimeConfig
     source_path: str = field(default="", compare=False)
     # The YAML-shaped mapping this Config was built from, kept verbatim so a
     # flight log can snapshot something that loads straight back through
@@ -661,7 +679,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     raw = copy.deepcopy(raw)
     with DEFAULT_CONFIG_PATH.open(encoding="utf-8") as handle:
         defaults = yaml.safe_load(handle)
-    for name in ("capture", "calibration"):
+    for name in ("capture", "calibration", "runtime"):
         raw.setdefault(name, defaults[name])
     env = _section(raw, "envelope")
     cam = _section(raw, "camera")
@@ -681,6 +699,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     log = _section(raw, "flightlog")
     capture = _section(raw, "capture")
     calibration = _section(raw, "calibration")
+    runtime = _section(raw, "runtime")
 
     rates = _get(mav, "stream_rates_hz", "mavlink")
     if not isinstance(rates, dict):
@@ -690,6 +709,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
 
     return Config(
         calibration=CalibrationConfig(**calibration),
+        runtime=RuntimeConfig(**runtime),
         capture=CaptureConfig(
             device_path=capture["device_path"],
             timeout_s=float(capture["timeout_s"]),

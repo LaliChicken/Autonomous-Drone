@@ -448,3 +448,34 @@ Validation: 482 passed, 6 opt-in tests skipped; Ruff clean. Projected checkerboa
 observations exercise the real solver and recover the 52 mm baseline within
 0.1 mm; corrupt artifacts and resolution mismatch are rejected. No real camera
 calibration or physical accuracy claim is made.
+
+## Package G decisions — record-only integration and sensor freshness
+
+Added the real CPU pipeline and record/synthetic/replay commands plus a run report.
+Raw FrameBundle stays raw: explicitly rectified arrays enter the depth helper,
+and the calibrated camera-to-body rotation is shared by scanning and target rays.
+Direct CPU-backend inference also rectifies when configured with a full calibration.
+Unobserved rectification/search borders remain invalid. Live perception requires
+candidate calibration; nominal geometry is restricted to offline development.
+
+The runner never constructs a command emitter and has no transmit option. Proposed
+commands, exact paired telemetry, occupancy, target detections and transitions are
+logged. Each run snapshots its calibration and hash; replay resolves this local
+copy. Frame bytes and run duration have configured limits. Faults close logs and
+write terminal status. Logs describe host-dequeue-to-proposal latency, not exposure
+or actuator latency. GPU integration waits for the missing comparison patch/results.
+
+MAVLink history is bounded and now exposes per-message and per-(sensor id,
+orientation) reception times. Effective frame-time telemetry becomes non-flyable
+when essential streams are stale, even when unrelated traffic keeps the link busy.
+The historical inclusive range bound is unchanged pending physical sentinel checks.
+These are input freshness interfaces, not substitutes for the owned safety modules.
+
+Body-relative occupancy has no ego-motion transform. The integrated runner retains
+history only with unchanged, stationary telemetry; otherwise it clears history
+before adding current evidence. This avoids remembering a wall at the wrong bearing.
+
+Validation: 492 passed, 6 opt-in tests skipped; Ruff clean; depth benchmark has no
+regressions. New tests drive real synthetic MJPG through depth, detection, planning,
+logging and byte-identical replay, including authority loss, reset, stale independent
+sensors, moving frames, frame-byte limits, source/depth faults and portable calibration.

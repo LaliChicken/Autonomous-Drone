@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from pymavlink import mavutil
 
+from sources.telemetry import RangeReading, TelemetrySample
 from sources.types import FcState
 
 if TYPE_CHECKING:
@@ -103,6 +104,9 @@ class MavlinkClient:
         self._rc: dict[int, int] = {}
         self._last_message_ns = 0
         self._message_counts: dict[str, int] = {}
+        self._received: dict[str, int] = {}
+        self._ranges: dict[tuple[int, int], RangeReading] = {}
+        self._history: deque[TelemetrySample] = deque(maxlen=cfg.runtime.telemetry_buffer_len)
 
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -189,6 +193,9 @@ class MavlinkClient:
         t_ns = int(self.clock() if t_ns is None else t_ns)
         kind = message.get_type()
         with self._lock:
+            if self._history and t_ns < self._history[-1].state.t_ns:
+                raise MavlinkError("telemetry timestamps must not move backwards")
+            self._received[kind] = t_ns
             self._last_message_ns = t_ns
             self._message_counts[kind] = self._message_counts.get(kind, 0) + 1
 
@@ -206,6 +213,12 @@ class MavlinkClient:
                 in_range = (
                     message.min_distance / 100.0 <= distance_m <= message.max_distance / 100.0
                 )
+                self._ranges[(int(message.id), int(message.orientation))] = RangeReading(
+                    int(message.id), int(message.orientation), t_ns,
+                    distance_m if in_range else None,
+                )
+                # QUESTION(rahul): confirm TFmini/FC max-range sentinel semantics.
+                # The existing inclusive MAVLink bounds are preserved until measured.
                 # Out-of-range readings are dropped rather than stored: a
                 # rangefinder reporting its max value means "nothing seen",
                 # not "the ground is 12 m away".
@@ -222,6 +235,23 @@ class MavlinkClient:
                 self._mode = self._mode_name(message)
             elif kind == "RC_CHANNELS":
                 self._rc = self._rc_map(message)
+
+            self._history.append(TelemetrySample(
+                FcState(t_ns, self._roll, self._pitch, self._yaw, self._vel_ned,
+                        self._agl_m, self._mode, self._armed, self._ekf_ok, dict(self._rc)),
+                dict(self._received), dict(self._ranges),
+            ))
+
+    def telemetry_at(self, t_ns: int) -> TelemetrySample | None:
+        """Last actual observation at/before the frame; never extrapolate into its past."""
+        with self._lock:
+            sample = next((s for s in reversed(self._history) if s.state.t_ns <= t_ns), None)
+            if sample is None:
+                return None
+            from dataclasses import replace
+
+            return TelemetrySample(replace(sample.state, rc=dict(sample.state.rc)),
+                                   dict(sample.received), dict(sample.ranges))
 
     @staticmethod
     def _sys_status_ekf_ok(message: Any) -> bool:

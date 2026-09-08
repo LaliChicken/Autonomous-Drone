@@ -25,6 +25,14 @@ camera:
   # See QUESTION(rahul) in config/schema.py.
   calibration_npz: null
 
+runtime:
+  telemetry_buffer_len: 512
+  telemetry_timeout_s: 1.0
+  range_timeout_s: 0.5
+  max_run_bytes: 1073741824  # Stop recording before exceeding this MJPG budget
+  max_duration_s: 600.0
+  synthetic_frames: 30
+
 calibration:
   # QUESTION(rahul): set the measured target's INNER corner counts and square size.
   columns: null
