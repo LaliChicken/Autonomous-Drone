@@ -48,6 +48,31 @@ class EnvelopeConfig:
 
 
 @dataclass(frozen=True)
+class CalibrationConfig:
+    columns: int | None
+    rows: int | None
+    square_m: float | None
+    min_pairs: int
+    sample_interval_s: float
+    max_iterations: int
+    epsilon: float
+    alpha: float
+
+    def validate(self) -> None:
+        for name in ("columns", "rows"):
+            value = getattr(self, name)
+            _require(value is None or value >= 2, f"calibration.{name} must be >= 2")
+        _require(self.square_m is None or (math.isfinite(self.square_m) and self.square_m > 0),
+                 "calibration.square_m must be finite and > 0")
+        _require(self.min_pairs >= 3, "calibration.min_pairs must be >= 3")
+        _require(self.max_iterations > 0, "calibration.max_iterations must be > 0")
+        for name in ("sample_interval_s", "epsilon"):
+            value = getattr(self, name)
+            _require(math.isfinite(value) and value > 0, f"calibration.{name} must be > 0")
+        _require(0 <= self.alpha <= 1, "calibration.alpha must be in [0, 1]")
+
+
+@dataclass(frozen=True)
 class CaptureConfig:
     device_path: str | None
     timeout_s: float
@@ -547,6 +572,7 @@ class Config:
     metrics: MetricsConfig
     flightlog: FlightlogConfig
     capture: CaptureConfig
+    calibration: CalibrationConfig
     source_path: str = field(default="", compare=False)
     # The YAML-shaped mapping this Config was built from, kept verbatim so a
     # flight log can snapshot something that loads straight back through
@@ -633,9 +659,10 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     # Old run snapshots predate capture. Take additive defaults from the shipped
     # YAML, keeping tunables in one place and old logs replayable.
     raw = copy.deepcopy(raw)
-    if "capture" not in raw:
-        with DEFAULT_CONFIG_PATH.open(encoding="utf-8") as handle:
-            raw["capture"] = yaml.safe_load(handle)["capture"]
+    with DEFAULT_CONFIG_PATH.open(encoding="utf-8") as handle:
+        defaults = yaml.safe_load(handle)
+    for name in ("capture", "calibration"):
+        raw.setdefault(name, defaults[name])
     env = _section(raw, "envelope")
     cam = _section(raw, "camera")
     mount = _section(raw, "mount")
@@ -653,6 +680,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     met = _section(raw, "metrics")
     log = _section(raw, "flightlog")
     capture = _section(raw, "capture")
+    calibration = _section(raw, "calibration")
 
     rates = _get(mav, "stream_rates_hz", "mavlink")
     if not isinstance(rates, dict):
@@ -661,6 +689,7 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     calib = _get(cam, "calibration_npz", "camera")
 
     return Config(
+        calibration=CalibrationConfig(**calibration),
         capture=CaptureConfig(
             device_path=capture["device_path"],
             timeout_s=float(capture["timeout_s"]),

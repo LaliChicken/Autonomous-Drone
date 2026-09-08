@@ -429,3 +429,22 @@ Validation: 477 passed, 6 opt-in tests skipped. New tests exercise real spawned
 workers with synthetic transport, latest-frame delivery, original byte retention,
 decode/replay equivalence, disconnects, corrupt packets, shape mismatch and bounded
 shutdown of a stalled read. No physical camera was opened.
+
+## Package F decisions — calibration candidates
+
+Added original-MJPG calibration recording, measured-checkerboard corner detection,
+OpenCV intrinsic/stereo solving and a versioned NPZ with maps, geometry, fit RMS,
+input hashes, sequences and configuration metadata. Board dimensions default to
+null and solving refuses to guess them. Output creation is exclusive.
+
+Rectification verifies dimensions, finite arrays and supported horizontal geometry;
+its valid disparity ROI excludes unsupported edges. It exposes the inverse left
+rectification rotation for downstream body-frame projection. Calibration fit RMS
+is not held-out accuracy; every solver output is explicitly unvalidated. The
+owned calib/validate.py remains empty. Physical board diversity, held-out epipolar
+error and measured-distance acceptance still require hardware/owner delivery.
+
+Validation: 482 passed, 6 opt-in tests skipped; Ruff clean. Projected checkerboard
+observations exercise the real solver and recover the 52 mm baseline within
+0.1 mm; corrupt artifacts and resolution mismatch are rejected. No real camera
+calibration or physical accuracy claim is made.

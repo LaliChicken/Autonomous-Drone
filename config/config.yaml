@@ -25,6 +25,17 @@ camera:
   # See QUESTION(rahul) in config/schema.py.
   calibration_npz: null
 
+calibration:
+  # QUESTION(rahul): set the measured target's INNER corner counts and square size.
+  columns: null
+  rows: null
+  square_m: null
+  min_pairs: 15
+  sample_interval_s: 1.0
+  max_iterations: 100
+  epsilon: 0.000001
+  alpha: 0.0
+
 capture:
   device_path: null         # Prefer /dev/v4l/by-id/...; null uses camera.device_index
   timeout_s: 5.0            # Includes startup; a stalled read is a terminal fault
