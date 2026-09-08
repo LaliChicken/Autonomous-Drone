@@ -399,3 +399,13 @@ MAVLink behaviour and are unverified end to end.
 **`control/gate.py`, `control/watchdog.py`, `planner/governor.py`,
 `planner/supervisor.py` untouched** — owned. `OffboardLoop` takes `emit` as an
 injected callable; in tests that is a list, in flight it is the gate.
+
+## Package E0 decisions — restore validation
+
+Removed stray backticks from the behaviour guard without changing its logic.
+Preserved pre-existing executable-bit changes and the SITL diagnostic print.
+Validation: 467 passed, 6 opt-in tests skipped; project-scoped Ruff clean;
+`tools.bench --check` reports no regressions. The CUDA shell/comparison patches
+are absent from local branches and the searched workspace. Their recovery and
+Jetson measurements remain external dependencies; historical counts are not
+results from this checkout.
