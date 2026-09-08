@@ -48,6 +48,63 @@ class EnvelopeConfig:
 
 
 @dataclass(frozen=True)
+class RuntimeConfig:
+    telemetry_buffer_len: int
+    telemetry_timeout_s: float
+    range_timeout_s: float
+    max_run_bytes: int
+    max_duration_s: float
+    synthetic_frames: int
+
+    def validate(self) -> None:
+        for name in ("telemetry_buffer_len", "max_run_bytes", "synthetic_frames"):
+            _require(getattr(self, name) > 0, f"runtime.{name} must be > 0")
+        for name in ("telemetry_timeout_s", "range_timeout_s", "max_duration_s"):
+            value = getattr(self, name)
+            _require(math.isfinite(value) and value > 0, f"runtime.{name} must be finite and > 0")
+
+
+@dataclass(frozen=True)
+class CalibrationConfig:
+    columns: int | None
+    rows: int | None
+    square_m: float | None
+    min_pairs: int
+    sample_interval_s: float
+    max_iterations: int
+    epsilon: float
+    alpha: float
+
+    def validate(self) -> None:
+        for name in ("columns", "rows"):
+            value = getattr(self, name)
+            _require(value is None or value >= 2, f"calibration.{name} must be >= 2")
+        _require(self.square_m is None or (math.isfinite(self.square_m) and self.square_m > 0),
+                 "calibration.square_m must be finite and > 0")
+        _require(self.min_pairs >= 3, "calibration.min_pairs must be >= 3")
+        _require(self.max_iterations > 0, "calibration.max_iterations must be > 0")
+        for name in ("sample_interval_s", "epsilon"):
+            value = getattr(self, name)
+            _require(math.isfinite(value) and value > 0, f"calibration.{name} must be > 0")
+        _require(0 <= self.alpha <= 1, "calibration.alpha must be in [0, 1]")
+
+
+@dataclass(frozen=True)
+class CaptureConfig:
+    device_path: str | None
+    timeout_s: float
+    shutdown_timeout_s: float
+    max_packet_bytes: int
+
+    def validate(self) -> None:
+        _require(self.device_path is None or bool(self.device_path), "capture.device_path is empty")
+        for name in ("timeout_s", "shutdown_timeout_s"):
+            value = getattr(self, name)
+            _require(math.isfinite(value) and value > 0, f"capture.{name} must be finite and > 0")
+        _require(self.max_packet_bytes > 0, "capture.max_packet_bytes must be > 0")
+
+
+@dataclass(frozen=True)
 class CameraConfig:
     """Side-by-side stereo UVC device, split at the vertical midline."""
 
@@ -531,6 +588,9 @@ class Config:
     bench: BenchConfig
     metrics: MetricsConfig
     flightlog: FlightlogConfig
+    capture: CaptureConfig
+    calibration: CalibrationConfig
+    runtime: RuntimeConfig
     source_path: str = field(default="", compare=False)
     # The YAML-shaped mapping this Config was built from, kept verbatim so a
     # flight log can snapshot something that loads straight back through
@@ -614,6 +674,13 @@ def _deg(section: dict[str, Any], name: str, path: str) -> float:
 
 
 def _build(raw: dict[str, Any], source_path: str) -> Config:
+    # Old run snapshots predate capture. Take additive defaults from the shipped
+    # YAML, keeping tunables in one place and old logs replayable.
+    raw = copy.deepcopy(raw)
+    with DEFAULT_CONFIG_PATH.open(encoding="utf-8") as handle:
+        defaults = yaml.safe_load(handle)
+    for name in ("capture", "calibration", "runtime"):
+        raw.setdefault(name, defaults[name])
     env = _section(raw, "envelope")
     cam = _section(raw, "camera")
     mount = _section(raw, "mount")
@@ -630,6 +697,9 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     ben = _section(raw, "bench")
     met = _section(raw, "metrics")
     log = _section(raw, "flightlog")
+    capture = _section(raw, "capture")
+    calibration = _section(raw, "calibration")
+    runtime = _section(raw, "runtime")
 
     rates = _get(mav, "stream_rates_hz", "mavlink")
     if not isinstance(rates, dict):
@@ -638,6 +708,14 @@ def _build(raw: dict[str, Any], source_path: str) -> Config:
     calib = _get(cam, "calibration_npz", "camera")
 
     return Config(
+        calibration=CalibrationConfig(**calibration),
+        runtime=RuntimeConfig(**runtime),
+        capture=CaptureConfig(
+            device_path=capture["device_path"],
+            timeout_s=float(capture["timeout_s"]),
+            shutdown_timeout_s=float(capture["shutdown_timeout_s"]),
+            max_packet_bytes=int(capture["max_packet_bytes"]),
+        ),
         envelope=EnvelopeConfig(
             max_speed_mps=float(_get(env, "max_speed_mps", "envelope")),
             max_agl_m=float(_get(env, "max_agl_m", "envelope")),

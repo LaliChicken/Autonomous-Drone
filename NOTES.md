@@ -399,3 +399,115 @@ MAVLink behaviour and are unverified end to end.
 **`control/gate.py`, `control/watchdog.py`, `planner/governor.py`,
 `planner/supervisor.py` untouched** — owned. `OffboardLoop` takes `emit` as an
 injected callable; in tests that is a list, in flight it is the gate.
+
+## Package E0 decisions — restore validation
+
+Removed stray backticks from the behaviour guard without changing its logic.
+Preserved pre-existing executable-bit changes and the SITL diagnostic print.
+Validation: 467 passed, 6 opt-in tests skipped; project-scoped Ruff clean;
+`tools.bench --check` reports no regressions. The CUDA shell/comparison patches
+are absent from local branches and the searched workspace. Their recovery and
+Jetson measurements remain external dependencies; historical counts are not
+results from this checkout.
+
+## Package E decisions — live stereo source
+
+Capture owns one bounded shared-memory MJPG slot in a spawned process. Blocking
+OpenCV calls can be terminated on shutdown; the consumer never waits through a
+backlog. Sequence gaps expose discarded frames. Invalid formats, shape changes,
+non-monotonic timestamps, disconnects and timeouts latch a fault until restart.
+Raw bytes are preserved and replay now delegates to the source's decoder/splitter.
+Existing log configs acquire additive capture defaults from the shipped YAML.
+
+The OpenCV V4L2 transport is unverified on the actual camera. Its timestamps are
+explicitly host-dequeue CLOCK_MONOTONIC, not exposure timestamps. The frozen frame
+contract is unchanged; latency from these timestamps excludes earlier device
+buffering. Flight use remains blocked on timestamp verification. Raw logging
+requires MJPG; a decoded BGR fallback is deliberately not re-encoded.
+
+Validation: 477 passed, 6 opt-in tests skipped. New tests exercise real spawned
+workers with synthetic transport, latest-frame delivery, original byte retention,
+decode/replay equivalence, disconnects, corrupt packets, shape mismatch and bounded
+shutdown of a stalled read. No physical camera was opened.
+
+## Package F decisions — calibration candidates
+
+Added original-MJPG calibration recording, measured-checkerboard corner detection,
+OpenCV intrinsic/stereo solving and a versioned NPZ with maps, geometry, fit RMS,
+input hashes, sequences and configuration metadata. Board dimensions default to
+null and solving refuses to guess them. Output creation is exclusive.
+
+Rectification verifies dimensions, finite arrays and supported horizontal geometry;
+its valid disparity ROI excludes unsupported edges. It exposes the inverse left
+rectification rotation for downstream body-frame projection. Calibration fit RMS
+is not held-out accuracy; every solver output is explicitly unvalidated. The
+owned calib/validate.py remains empty. Physical board diversity, held-out epipolar
+error and measured-distance acceptance still require hardware/owner delivery.
+
+Validation: 482 passed, 6 opt-in tests skipped; Ruff clean. Projected checkerboard
+observations exercise the real solver and recover the 52 mm baseline within
+0.1 mm; corrupt artifacts and resolution mismatch are rejected. No real camera
+calibration or physical accuracy claim is made.
+
+## Package G decisions — record-only integration and sensor freshness
+
+Added the real CPU pipeline and record/synthetic/replay commands plus a run report.
+Raw FrameBundle stays raw: explicitly rectified arrays enter the depth helper,
+and the calibrated camera-to-body rotation is shared by scanning and target rays.
+Direct CPU-backend inference also rectifies when configured with a full calibration.
+Unobserved rectification/search borders remain invalid. Live perception requires
+candidate calibration; nominal geometry is restricted to offline development.
+
+The runner never constructs a command emitter and has no transmit option. Proposed
+commands, exact paired telemetry, occupancy, target detections and transitions are
+logged. Each run snapshots its calibration and hash; replay resolves this local
+copy. Frame bytes and run duration have configured limits. Faults close logs and
+write terminal status. Logs describe host-dequeue-to-proposal latency, not exposure
+or actuator latency. GPU integration waits for the missing comparison patch/results.
+
+MAVLink history is bounded and now exposes per-message and per-(sensor id,
+orientation) reception times. Effective frame-time telemetry becomes non-flyable
+when essential streams are stale, even when unrelated traffic keeps the link busy.
+The historical inclusive range bound is unchanged pending physical sentinel checks.
+These are input freshness interfaces, not substitutes for the owned safety modules.
+
+Body-relative occupancy has no ego-motion transform. The integrated runner retains
+history only with unchanged, stationary telemetry; otherwise it clears history
+before adding current evidence. This avoids remembering a wall at the wrong bearing.
+
+Validation: 492 passed, 6 opt-in tests skipped; Ruff clean; depth benchmark has no
+regressions. New tests drive real synthetic MJPG through depth, detection, planning,
+logging and byte-identical replay, including authority loss, reset, stale independent
+sensors, moving frames, frame-byte limits, source/depth faults and portable calibration.
+
+## Package H decisions — deployment and acceptance evidence
+
+Added a filtered Nix application package requiring an explicit, proven JetPack
+Python environment and a disabled-by-default NixOS service. The service owns its
+capture subprocesses, grants configured device groups, writes a state directory,
+and does not auto-restart on faults or recording limits. Both Nix files parse;
+this workstation has no configured nixpkgs evaluation environment. No Jetson build,
+service activation or CUDA environment substitution was performed. Aggregate log
+retention remains a deployment policy; the application never deletes recordings.
+
+Run metadata now includes interpreter/OpenCV/NumPy versions and the deployment
+build id. Replay checks the calibration snapshot hash. Shared-memory packet copying
+uses byte views to avoid constructing per-byte Python lists. Added usage and
+completion/dependency documentation and an explicit physical-camera opt-in test.
+
+Validation: 492 passed, 8 opt-in tests skipped; Ruff clean; committed synthetic depth
+benchmark has no regressions. A five-frame CLI smoke recording replayed identically.
+The six existing SITL scenarios passed in 33.90 s against the local built simulator,
+normally armed in GUIDED and taken off to 5 m. The new record-only SITL telemetry /
+CPU pipeline / replay test passed separately in 2.96 s. Its first run against a
+freshly restarted, unprepared simulator failed for missing essential telemetry;
+reaching the documented airborne precondition resolved that failure. No assertion
+was weakened; failure diagnostics now include received message counts. Simulator
+processes were stopped after testing. No physical camera or flight controller was
+accessed, and no physical flight validation is claimed.
+
+Remaining work is explicit in docs/COMPLETION_STATUS.md: missing CUDA patch/results,
+physical capture/calibration/timing measurements, owned safety and validation
+modules, forward-range fusion and ground masking, Jetson build/deployment/retention,
+loaded-power/assembly checks and controlled flight acceptance. Ownership restrictions
+and the frozen sources/types.py contract remain in force.

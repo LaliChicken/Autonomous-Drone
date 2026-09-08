@@ -154,6 +154,7 @@ def scan_from_depth(
     cfg: Config,
     q: np.ndarray | None = None,
     exclude_mask: np.ndarray | None = None,
+    rotation_body_from_cam: np.ndarray | None = None,
 ) -> ObstacleScan:
     """Turn a DepthResult into an azimuth scan in the body frame.
 
@@ -180,7 +181,8 @@ def scan_from_depth(
     keep = valid.reshape(-1) & np.isfinite(depth.depth_m.reshape(-1))
     xf, yf, zf = x.reshape(-1)[keep], y.reshape(-1)[keep], z.reshape(-1)[keep]
 
-    rotation = cfg.mount.rotation_body_from_cam()
+    rotation = (cfg.mount.rotation_body_from_cam() if rotation_body_from_cam is None
+                else rotation_body_from_cam)
     translation = cfg.mount.translation()
     bx, by, bz = points_camera_to_body(xf, yf, zf, rotation, translation)
 

@@ -24,8 +24,11 @@ name a directory; everything the pipeline reads back is monotonic ns.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
 from collections.abc import Iterator
@@ -255,11 +258,19 @@ class FlightLog:
 
         # config.yaml is the re-loadable snapshot; config.json is the resolved
         # view. Both, because each answers a question the other cannot.
-        if cfg.raw:
+        calibration_hash = None
+        raw = copy.deepcopy(cfg.raw)
+        if cfg.camera.calibration_npz is not None:
+            calibration_copy = run_dir / "calibration.npz"
+            shutil.copyfile(cfg.camera.calibration_npz, calibration_copy)
+            calibration_hash = hashlib.sha256(calibration_copy.read_bytes()).hexdigest()
+            if raw:
+                raw["camera"]["calibration_npz"] = "calibration.npz"
+        if raw:
             import yaml
 
             (run_dir / CONFIG_YAML_NAME).write_text(
-                yaml.safe_dump(cfg.raw, sort_keys=True, default_flow_style=False),
+                yaml.safe_dump(raw, sort_keys=True, default_flow_style=False),
                 encoding="utf-8",
             )
         (run_dir / CONFIG_JSON_NAME).write_text(
@@ -278,6 +289,7 @@ class FlightLog:
             "t_start_ns": time.monotonic_ns(),
             "git": git_revision(),
             "config_source": cfg.source_path,
+            "calibration_sha256": calibration_hash,
             "write_frames": cfg.flightlog.write_frames,
         }
         self._write_meta()
@@ -404,7 +416,16 @@ class FlightLogReader:
         """Rebuild the exact Config the run was flown with."""
         from config import load_config_from_dict
 
-        return load_config_from_dict(self.raw_config(), str(self.run_dir / CONFIG_YAML_NAME))
+        raw = self.raw_config()
+        calibration = raw.get("camera", {}).get("calibration_npz")
+        if calibration is not None and not Path(calibration).is_absolute():
+            raw["camera"]["calibration_npz"] = str((self.run_dir / calibration).resolve())
+        expected_hash = self.meta.get("calibration_sha256")
+        if expected_hash and calibration is not None:
+            artifact = Path(raw["camera"]["calibration_npz"])
+            if hashlib.sha256(artifact.read_bytes()).hexdigest() != expected_hash:
+                raise FlightLogError("recorded calibration hash mismatch")
+        return load_config_from_dict(raw, str(self.run_dir / CONFIG_YAML_NAME))
 
     def _iter_jsonl(self, name: str) -> Iterator[dict[str, Any]]:
         path = self.run_dir / name

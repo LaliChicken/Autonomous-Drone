@@ -5,6 +5,9 @@ __pycache__/
 .venv/
 venv/
 
+# Local upstream simulator checkout; ArduPilot is maintained separately.
+/ardupilot/
+
 # Datasets are fetched by tools/get_middlebury.py, never committed.
 data/
 

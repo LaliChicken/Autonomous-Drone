@@ -453,6 +453,7 @@ def test_sitl_picks_the_gap(sitl_client, cfg: Config) -> None:
         )
         sitl_client.send_command(command)
         yaw_rates.append(command.yaw_rate)
+        print(command.reason, command.vx, command.yaw_rate)
         time.sleep(0.05)
 
     assert yaw_rates

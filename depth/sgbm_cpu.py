@@ -69,6 +69,12 @@ class SgbmCpuBackend:
         q: np.ndarray | None = None,
         metrics: Metrics | None = None,
     ) -> None:
+        self.rectifier = None
+        if q is None and cfg.camera.calibration_npz is not None:
+            from calib.rectify import Rectifier
+
+            self.rectifier = Rectifier(cfg.camera.calibration_npz, cfg)
+            q = self.rectifier.q
         self.cfg = cfg
         self.post = cfg.depth.postprocess
         self.metrics = metrics
@@ -133,13 +139,25 @@ class SgbmCpuBackend:
 
     def infer(self, f: FrameBundle) -> DepthResult:
         """FrameBundle -> DepthResult. Satisfies sources.types.DepthBackend."""
-        if f.left.shape != f.right.shape:
+        left, right = (self.rectifier.apply(f.left, f.right) if self.rectifier
+                       else (f.left, f.right))
+        result = self.infer_rectified(left, right, f.t_ns)
+        if self.rectifier:
+            result.valid &= self.rectifier.valid
+            result.depth_m[~result.valid] = np.nan
+            if result.conf is not None:
+                result.conf[~result.valid] = 0
+        return result
+
+    def infer_rectified(self, left: np.ndarray, right: np.ndarray, t_ns: int) -> DepthResult:
+        """Infer on explicitly rectified arrays; FrameBundle remains raw at the boundary."""
+        if left.shape != right.shape:
             raise ValueError(
-                f"stereo halves must match: left {f.left.shape} vs right {f.right.shape}"
+                f"stereo halves must match: left {left.shape} vs right {right.shape}"
             )
         min_disparity = self.cfg.depth.sgbm.min_disparity
 
-        disparity_fixed = self.compute_disparity(f.left, f.right)
+        disparity_fixed = self.compute_disparity(left, right)
 
         with self._stage("depth.speckle"):
             disparity_fixed = remove_speckles(disparity_fixed, self.post, min_disparity)
@@ -148,7 +166,7 @@ class SgbmCpuBackend:
         disparity = to_float_disparity(disparity_fixed)
 
         if self.post.lr_consistency:
-            right_fixed = self.compute_right_disparity(f.left, f.right)
+            right_fixed = self.compute_right_disparity(left, right)
             with self._stage("depth.lr_check"):
                 consistent = left_right_consistency_mask(
                     disparity,
@@ -166,7 +184,7 @@ class SgbmCpuBackend:
             return postprocess_depth(
                 depth_m=depth_m,
                 valid=valid,
-                t_ns=f.t_ns,
+                t_ns=t_ns,
                 focal_px=self.focal_px,
                 baseline_m=self.baseline_m,
                 cfg=self.post,

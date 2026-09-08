@@ -129,6 +129,7 @@ def detect(
     t_ns: int,
     depth: DepthResult | None = None,
     q: np.ndarray | None = None,
+    rotation_body_from_cam: np.ndarray | None = None,
 ) -> list[RedBoxDetection]:
     """All candidates passing the filters, best confidence first.
 
@@ -138,7 +139,8 @@ def detect(
     box: RedBoxConfig = cfg.red_box
     q = cfg.camera.load_q() if q is None else np.asarray(q, dtype=np.float64)
     focal, cx, cy = float(q[2][3]), float(-q[0][3]), float(-q[1][3])
-    rotation = cfg.mount.rotation_body_from_cam()
+    rotation = (cfg.mount.rotation_body_from_cam() if rotation_body_from_cam is None
+                else rotation_body_from_cam)
 
     height, width = image_bgr.shape[:2]
     mask = clean_mask(red_mask(image_bgr, box), box)
@@ -223,7 +225,9 @@ def best_detection(
     t_ns: int,
     depth: DepthResult | None = None,
     q: np.ndarray | None = None,
+    rotation_body_from_cam: np.ndarray | None = None,
 ) -> RedBoxDetection | None:
     """Highest-confidence candidate, or None."""
-    found = detect(image_bgr, cfg, t_ns, depth=depth, q=q)
+    found = detect(image_bgr, cfg, t_ns, depth=depth, q=q,
+                   rotation_body_from_cam=rotation_body_from_cam)
     return found[0] if found else None

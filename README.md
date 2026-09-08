@@ -8,12 +8,21 @@ over MAVLink.
 synthetic data, and ArduPilot SITL. Nothing assumes a camera or flight controller
 is present.
 
+A CPU **record-only application** now connects capture, candidate rectification,
+perception, planning and logs. It never transmits flight commands. Calibration
+validation, GPU evaluation, safety-owner deliveries and hardware acceptance remain
+open; see [completion status](docs/COMPLETION_STATUS.md).
+
 ## Layout
 
 | Path | What it does |
 | --- | --- |
 | `config/` | Every tunable, as YAML + validated frozen dataclasses |
 | `sources/types.py` | **Frozen contract.** Do not modify |
+| `sources/stereo_uvc.py` | Bounded original-MJPG capture and shared decoding |
+| `calib/` | Calibration recording, candidate solving and rectification |
+| `infra/pipeline.py` | Shared record-only CPU pipeline for live and replay |
+| `tools/run.py` | Device listing, recording, synthetic runs and replay CLI |
 | `sources/mavlink_client.py` | Threaded MAVLink reader, state, setpoint sender |
 | `depth/sgbm_cpu.py` | StereoSGBM `DepthBackend` |
 | `depth/postprocess.py` | Speckles, L/R consistency, range clamp, confidence |
@@ -42,7 +51,7 @@ uv pip install --python .venv/bin/python numpy opencv-python pymavlink pyyaml py
 ## Checks
 
 ```bash
-.venv/bin/ruff check .
+.venv/bin/ruff check calib config control depth infra perception planner sources sim tests tools world
 .venv/bin/python -m pytest -q
 ```
 
@@ -129,16 +138,66 @@ These are enforced by tests, not just documented:
 - **Unknown ≠ clear.** Missing information stays unknown and is impassable. A bin
   that ages out becomes unknown, not clear.
 
-## Open questions
+## Record-only workflow
 
-Marked `# QUESTION(rahul):` in the source:
+**Workstation-side:** exercise the complete CPU pipeline without hardware:
 
-- `config/schema.py` — no stereo calibration exists, so depth falls back to a nominal
-  Q. Should `sgbm_cpu` refuse to run without one?
-- `perception/obstacles.py` — SGBM cannot match the leftmost `numDisparities`
-  columns, so ~6.5° of the 65° FOV is permanently unknown, and therefore permanently
-  impassable. This biases the planner against left turns.
-- `infra/replay.py` — replay owns the MJPG decode/split rule because
-  `sources/stereo_uvc.py` is still empty.
-- `tools/get_middlebury.py` — the download path has never been executed; this
-  environment cannot reach `vision.middlebury.edu`.
+```bash
+.venv/bin/python -m tools.run synthetic --frames 5
+# Substitute the printed run directory:
+.venv/bin/python -m tools.run replay runs/RUN_ID
+.venv/bin/python -m tools.flight_report runs/RUN_ID
+```
+
+The default synthetic run has no FC telemetry, so its proposed commands stay IDLE.
+The integration tests also exercise target acquisition, movement proposals and
+telemetry loss. Replay compares proposed commands byte-for-byte with those logged.
+
+**Jetson-side, in the proven Python/CUDA shell:** select the camera and record
+calibration samples, without flight-controller access:
+
+```bash
+python3 -m tools.run devices
+# Configure capture.device_path and the measured calibration target in deployment.yaml.
+DRONE_HW=1 DRONE_CONFIG=deployment.yaml python3 -m pytest -q tests/test_stereo_uvc.py
+python3 -m calib.capture --config deployment.yaml --pairs 30
+python3 -m calib.solve runs/RUN_ID candidate.npz --config deployment.yaml
+```
+
+`calibration.columns` and `rows` are **inner checkerboard corners**; `square_m` must
+be measured. Defaults are unset. Move the board through varied positions and tilts;
+record extra pairs because the solver uses only pairs detected in both eyes.
+The solver writes an **unvalidated candidate**, not flight approval.
+
+Set `camera.calibration_npz` to that candidate's absolute path in deployment.yaml,
+then run CPU perception with logging:
+
+```bash
+python3 -m tools.run record --config deployment.yaml --frames 200
+# Optionally add --telemetry to receive the configured MAVLink streams.
+```
+
+Live perception refuses nominal geometry. Raw calibration capture does not require
+calibration. Each run keeps the original processed-frame MJPG bytes, effective
+telemetry inputs, proposed commands, metrics and a hashed calibration copy. Frame
+queue drops and terminal faults appear in `runtime.json`; timestamps from the
+OpenCV transport are **host-dequeue monotonic time**, not verified exposure time.
+
+Recording stops at the configured duration or encoded-frame-byte limit. Restart
+explicitly after correcting capture faults. Neither the CLI nor the optional
+[NixOS deployment module](docs/DEPLOYMENT.md) offers command transmission.
+
+## Remaining decisions
+
+- Verify actual camera timestamps, raw MJPG format and eye ordering on the Jetson.
+- Measure the calibration target; obtain held-out validation from the calibration owner.
+- Recover the missing CUDA shell/comparison patches and review measured GPU results
+  before selecting a runtime backend or changing resolution.
+- Stereo's left search margin and rectification borders remain unknown and impassable.
+  The runner clears body-relative occupancy history while moving because no
+  ego-motion transform exists yet.
+- Confirm actual rangefinder sentinel semantics and implement forward-range fusion.
+- Integrate the owned safety modules and establish stopping/latency acceptance before
+  any flight-command path. The complete remaining list is in the completion status.
+- `tools/get_middlebury.py` still needs a verified real dataset download; its local
+  fixture tests do not establish remote download availability.
